@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -march=native -Wall -Wextra CMakeFiles/DataCleanApp.dir/DataCleanApp.cpp.o -o ../../bin/DataCleanApp  ../preprocessing/libpreprocessing.a 

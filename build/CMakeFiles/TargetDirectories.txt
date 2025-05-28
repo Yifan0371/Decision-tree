@@ -1,0 +1,8 @@
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/CMakeFiles/edit_cache.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/CMakeFiles/rebuild_cache.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/src/preprocessing/CMakeFiles/preprocessing.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/src/preprocessing/CMakeFiles/edit_cache.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/src/preprocessing/CMakeFiles/rebuild_cache.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/src/app/CMakeFiles/DataCleanApp.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/src/app/CMakeFiles/edit_cache.dir
+/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/src/app/CMakeFiles/rebuild_cache.dir
