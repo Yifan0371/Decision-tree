@@ -31,5 +31,5 @@
 *.out
 *.app
 /build/
-/bin/          # ✅ 新增这一行，忽略 bin 文件夹
+/bin/         
 .vscode/

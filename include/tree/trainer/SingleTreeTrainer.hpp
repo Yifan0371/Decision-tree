@@ -36,6 +36,10 @@ private:
                    const std::vector<int>& indices,
                    int depth);
 
+    // 计算树统计信息的辅助函数
+    void calculateTreeStats(const Node* node, int currentDepth, 
+                           int& maxDepth, int& leafCount) const;
+
     int  maxDepth_;
     int  minSamplesLeaf_;
     std::unique_ptr<ISplitFinder>   finder_;

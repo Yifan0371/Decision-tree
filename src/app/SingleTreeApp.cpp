@@ -68,3 +68,4 @@ void runSingleTreeApp(const ProgramOptions& opts) {
     std::cout << "MSE = " << mse << "\n";
     std::cout << "MAE = " << mae << "\n";
 }
+

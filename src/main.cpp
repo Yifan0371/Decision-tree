@@ -1,32 +1,47 @@
-#include <chrono>
 #include "app/SingleTreeApp.hpp"
 #include <iostream>
-#include <algorithm>
 
-int main(int argc, char** argv)
-{
-    /* 默认 + 命令行覆盖（同前） */
-    ProgramOptions opt;
-    opt.dataPath       = "../data/data_clean/cleaned_data.csv";
-    opt.maxDepth       = 2;
-    opt.minSamplesLeaf = 50;
-    opt.criterion      = "mse";
-    if (argc >= 2) opt.dataPath       = argv[1];
-    if (argc >= 3) opt.maxDepth       = std::stoi(argv[2]);
-    if (argc >= 4) opt.minSamplesLeaf = std::stoi(argv[3]);
-    if (argc >= 5) opt.criterion      = argv[4];
+int main(int argc, char** argv) {
+    // 1. 设定默认参数
+    ProgramOptions opts;
+    opts.dataPath       = "../data/data_clean/cleaned_data.csv";
+    opts.maxDepth       = 800;
+    opts.minSamplesLeaf = 2;
+    opts.criterion      = "mse";  // 新增：默认使用 MSE
 
-    std::cout << "Running with " << opt.criterion << " …\n";
+    // 2. 如果用户提供了参数，就覆盖默认
+    if (argc >= 2) {
+        opts.dataPath = argv[1];
+    }
+    if (argc >= 3) {
+        opts.maxDepth = std::stoi(argv[2]);
+    }
+    if (argc >= 4) {
+        opts.minSamplesLeaf = std::stoi(argv[3]);
+    }
+    if (argc >= 5) {
+        opts.criterion = argv[4];  // 新增：可以指定准则
+    }
+    
+    // 3. 输出使用的参数
+    std::cout << "=== Program Parameters ===" << std::endl;
+    std::cout << "Data path: " << opts.dataPath << std::endl;
+    std::cout << "Max depth: " << opts.maxDepth << std::endl;
+    std::cout << "Min samples leaf: " << opts.minSamplesLeaf << std::endl;
+    std::cout << "Criterion: " << opts.criterion << std::endl;
+    std::cout << "===========================" << std::endl;
 
-    /* -------- 计时 -------- */
-    auto t0 = std::chrono::steady_clock::now();
+    // 4. 输出使用说明
+    if (argc < 2) {
+        std::cout << "\nUsage: " << argv[0] 
+                  << " <data_path> [max_depth] [min_samples_leaf] [criterion]" << std::endl;
+        std::cout << "Available criteria: mse, mae, huber, quantile[:tau], logcosh, poisson" << std::endl;
+        std::cout << "Example: " << argv[0] 
+                  << " data.csv 10 5 quantile:0.9" << std::endl;
+        std::cout << "Using default parameters...\n" << std::endl;
+    }
 
-    runSingleTreeApp(opt);
-
-    auto t1 = std::chrono::steady_clock::now();
-    double seconds =
-        std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
-
-    std::cout << "Total time: " << seconds << " s\n";
+    // 5. 运行
+    runSingleTreeApp(opts);
     return 0;
 }
