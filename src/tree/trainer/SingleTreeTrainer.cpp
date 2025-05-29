@@ -1,3 +1,4 @@
+
 #include "tree/trainer/SingleTreeTrainer.hpp"
 #include "tree/Node.hpp"
 #include <numeric>
@@ -9,21 +10,15 @@ SingleTreeTrainer::SingleTreeTrainer(std::unique_ptr<ISplitFinder>   finder,
                                      std::unique_ptr<IPruner>        pruner,
                                      int maxDepth,
                                      int minSamplesLeaf)
-    : finder_(std::move(finder)),
+    : maxDepth_(maxDepth),
+      minSamplesLeaf_(minSamplesLeaf),
+      finder_(std::move(finder)),
       criterion_(std::move(criterion)),
-      pruner_(std::move(pruner)),
-      maxDepth_(maxDepth),
-      minSamplesLeaf_(minSamplesLeaf) {}
+      pruner_(std::move(pruner)) {}
 
 void SingleTreeTrainer::train(const std::vector<double>& data,
                               int rowLength,
                               const std::vector<double>& labels) {
-    std::cout << "=== Training Parameters ===" << std::endl;
-    std::cout << "Max Depth: " << maxDepth_ << std::endl;
-    std::cout << "Min Samples Leaf: " << minSamplesLeaf_ << std::endl;
-    std::cout << "Dataset size: " << labels.size() << " samples, " 
-              << rowLength << " features" << std::endl;
-    
     root_ = std::make_unique<Node>();
     std::vector<int> indices(labels.size());
     std::iota(indices.begin(), indices.end(), 0);
@@ -31,13 +26,10 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     splitNode(root_.get(), data, rowLength, labels, indices, 0);
     pruner_->prune(root_);
     
-    // 添加树统计信息
+    // 简化的统计信息输出
     int treeDepth = 0, leafCount = 0;
     calculateTreeStats(root_.get(), 0, treeDepth, leafCount);
-    std::cout << "=== Final Tree Statistics ===" << std::endl;
-    std::cout << "Actual tree depth: " << treeDepth << std::endl;
-    std::cout << "Number of leaf nodes: " << leafCount << std::endl;
-    std::cout << "================================" << std::endl;
+    std::cout << "Tree: depth=" << treeDepth << ", leaves=" << leafCount;
 }
 
 void SingleTreeTrainer::splitNode(Node* node,
@@ -49,38 +41,13 @@ void SingleTreeTrainer::splitNode(Node* node,
     node->metric  = criterion_->nodeMetric(labels, indices);
     node->samples = indices.size();
 
-    // 详细的调试输出
-    if (depth <= 3) {
-        std::cout << "Depth " << depth << ": " << indices.size() 
-                  << " samples, metric=" << node->metric << std::endl;
-    }
-
-    // 修正停止条件
-    // 条件1: 达到最大深度
-    if (depth >= maxDepth_) {
+    // 停止条件检查（无调试输出）
+    if (depth >= maxDepth_ || 
+        indices.size() < 2 * (size_t)minSamplesLeaf_) {
         node->isLeaf = true;
         double sum = 0;
         for (int idx : indices) sum += labels[idx];
         node->prediction = sum / indices.size();
-        if (depth <= 5) {
-            std::cout << "  -> Leaf (max depth reached), prediction=" 
-                      << node->prediction << std::endl;
-        }
-        return;
-    }
-
-    // 条件2: 样本数太少，无法进行有意义的分裂
-    // 需要至少 2*minSamplesLeaf 才能分裂（左右各至少 minSamplesLeaf）
-    if (indices.size() < 2 * (size_t)minSamplesLeaf_) {
-        node->isLeaf = true;
-        double sum = 0;
-        for (int idx : indices) sum += labels[idx];
-        node->prediction = sum / indices.size();
-        if (depth <= 5) {
-            std::cout << "  -> Leaf (insufficient samples for split: " 
-                      << indices.size() << " < " << (2 * minSamplesLeaf_) 
-                      << "), prediction=" << node->prediction << std::endl;
-        }
         return;
     }
 
@@ -91,16 +58,12 @@ void SingleTreeTrainer::splitNode(Node* node,
         finder_->findBestSplit(data, rowLength, labels, indices,
                                node->metric, *criterion_);
 
-    // 条件3: 找不到有效的分裂点
+    // 检查分裂有效性
     if (bestFeat < 0 || bestImp <= 0) {
         node->isLeaf = true;
         double sum = 0;
         for (int idx : indices) sum += labels[idx];
         node->prediction = sum / indices.size();
-        if (depth <= 5) {
-            std::cout << "  -> Leaf (no beneficial split found), prediction=" 
-                      << node->prediction << std::endl;
-        }
         return;
     }
 
@@ -116,29 +79,14 @@ void SingleTreeTrainer::splitNode(Node* node,
         else              rightIdx.push_back(idx);
     }
 
-    // 关键修复：检查分裂后是否满足 minSamplesLeaf 约束
+    // 检查分裂后样本数约束
     if (leftIdx.size() < (size_t)minSamplesLeaf_ || 
         rightIdx.size() < (size_t)minSamplesLeaf_) {
         node->isLeaf = true;
         double sum = 0;
         for (int idx : indices) sum += labels[idx];
         node->prediction = sum / indices.size();
-        
-        if (depth <= 5) {
-            std::cout << "  -> Leaf (minSamplesLeaf constraint violated: left=" 
-                      << leftIdx.size() << ", right=" << rightIdx.size() 
-                      << ", required=" << minSamplesLeaf_ << "), prediction=" 
-                      << node->prediction << std::endl;
-        }
         return;
-    }
-
-    // 输出分裂信息
-    if (depth <= 3) {
-        std::cout << "  -> Split on feature " << bestFeat 
-                  << " <= " << bestThr << " (improvement=" << bestImp 
-                  << ", left=" << leftIdx.size() 
-                  << ", right=" << rightIdx.size() << ")" << std::endl;
     }
 
     // 创建子节点并递归分裂
@@ -150,7 +98,7 @@ void SingleTreeTrainer::splitNode(Node* node,
 }
 
 double SingleTreeTrainer::predict(const double* sample,
-                                  int rowLength) const {
+                                  int /* rowLength */) const {
     const Node* cur = root_.get();
     while (!cur->isLeaf) {
         double v = sample[cur->featureIndex];
@@ -176,7 +124,6 @@ void SingleTreeTrainer::evaluate(const std::vector<double>& X,
     mae /= n;
 }
 
-// 计算树统计信息的辅助函数
 void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth, 
                                            int& maxDepth, int& leafCount) const {
     if (!node) return;

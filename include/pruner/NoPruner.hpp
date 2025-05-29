@@ -5,8 +5,8 @@
 
 class NoPruner : public IPruner {
 public:
-    void prune(std::unique_ptr<Node>& root) const override {
-        // 不做任何剪枝
+    void prune(std::unique_ptr<Node>& /* root */) const override {
+        // 不做任何剪枝 - 使用注释语法避免未使用参数警告
     }
 };
 

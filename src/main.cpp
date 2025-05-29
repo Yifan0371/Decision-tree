@@ -1,3 +1,4 @@
+
 #include "app/SingleTreeApp.hpp"
 #include <iostream>
 
@@ -7,41 +8,24 @@ int main(int argc, char** argv) {
     opts.dataPath       = "../data/data_clean/cleaned_data.csv";
     opts.maxDepth       = 800;
     opts.minSamplesLeaf = 2;
-    opts.criterion      = "mse";  // 新增：默认使用 MSE
+    opts.criterion      = "mse";
+    opts.splitMethod    = "exhaustive";
 
-    // 2. 如果用户提供了参数，就覆盖默认
-    if (argc >= 2) {
-        opts.dataPath = argv[1];
-    }
-    if (argc >= 3) {
-        opts.maxDepth = std::stoi(argv[2]);
-    }
-    if (argc >= 4) {
-        opts.minSamplesLeaf = std::stoi(argv[3]);
-    }
-    if (argc >= 5) {
-        opts.criterion = argv[4];  // 新增：可以指定准则
-    }
+    // 2. 参数解析
+    if (argc >= 2) opts.dataPath = argv[1];
+    if (argc >= 3) opts.maxDepth = std::stoi(argv[2]);
+    if (argc >= 4) opts.minSamplesLeaf = std::stoi(argv[3]);
+    if (argc >= 5) opts.criterion = argv[4];
+    if (argc >= 6) opts.splitMethod = argv[5];
     
-    // 3. 输出使用的参数
-    std::cout << "=== Program Parameters ===" << std::endl;
-    std::cout << "Data path: " << opts.dataPath << std::endl;
-    std::cout << "Max depth: " << opts.maxDepth << std::endl;
-    std::cout << "Min samples leaf: " << opts.minSamplesLeaf << std::endl;
-    std::cout << "Criterion: " << opts.criterion << std::endl;
-    std::cout << "===========================" << std::endl;
+    // 3. 输出参数（简化版）
+    std::cout << "Data: " << opts.dataPath << " | ";
+    std::cout << "Depth: " << opts.maxDepth << " | ";
+    std::cout << "MinLeaf: " << opts.minSamplesLeaf << " | ";
+    std::cout << "Criterion: " << opts.criterion << " | ";
+    std::cout << "Split: " << opts.splitMethod << std::endl;
 
-    // 4. 输出使用说明
-    if (argc < 2) {
-        std::cout << "\nUsage: " << argv[0] 
-                  << " <data_path> [max_depth] [min_samples_leaf] [criterion]" << std::endl;
-        std::cout << "Available criteria: mse, mae, huber, quantile[:tau], logcosh, poisson" << std::endl;
-        std::cout << "Example: " << argv[0] 
-                  << " data.csv 10 5 quantile:0.9" << std::endl;
-        std::cout << "Using default parameters...\n" << std::endl;
-    }
-
-    // 5. 运行
+    // 4. 运行
     runSingleTreeApp(opts);
     return 0;
 }

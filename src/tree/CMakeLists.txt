@@ -7,6 +7,12 @@ add_library(DecisionTree_lib
     criterion/LogCoshCriterion.cpp
     criterion/PoissonCriterion.cpp
     finder/ExhaustiveSplitFinder.cpp
+    finder/RandomSplitFinder.cpp
+    finder/QuartileSplitFinder.cpp
+    finder/HistogramEWFinder.cpp
+    finder/HistogramEQFinder.cpp
+    finder/AdaptiveEWFinder.cpp
+    finder/AdaptiveEQFinder.cpp
     pruner/NoPruner.cpp
     trainer/SingleTreeTrainer.cpp
 )
