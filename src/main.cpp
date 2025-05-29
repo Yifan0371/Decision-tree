@@ -1,26 +1,32 @@
+#include <chrono>
 #include "app/SingleTreeApp.hpp"
 #include <iostream>
+#include <algorithm>
 
-int main(int argc, char** argv) {
-    // 1. 设定默认参数
-    ProgramOptions opts;
-    opts.dataPath       = "../data/data_clean/cleaned_data.csv";
-    opts.maxDepth       = 100;
-    opts.minSamplesLeaf = 2;
+int main(int argc, char** argv)
+{
+    /* 默认 + 命令行覆盖（同前） */
+    ProgramOptions opt;
+    opt.dataPath       = "../data/data_clean/cleaned_data.csv";
+    opt.maxDepth       = 2;
+    opt.minSamplesLeaf = 50;
+    opt.criterion      = "mse";
+    if (argc >= 2) opt.dataPath       = argv[1];
+    if (argc >= 3) opt.maxDepth       = std::stoi(argv[2]);
+    if (argc >= 4) opt.minSamplesLeaf = std::stoi(argv[3]);
+    if (argc >= 5) opt.criterion      = argv[4];
 
-    // 2. 如果用户提供了参数，就覆盖默认
-    if (argc >= 4) {
-        opts.dataPath       = argv[1];
-        opts.maxDepth       = std::stoi(argv[2]);
-        opts.minSamplesLeaf = std::stoi(argv[3]);
-    } else {
-        std::cout << "No command-line args, using defaults:\n"
-                  << "  dataPath="       << opts.dataPath       << "\n"
-                  << "  maxDepth="       << opts.maxDepth       << "\n"
-                  << "  minSamplesLeaf=" << opts.minSamplesLeaf << "\n";
-    }
+    std::cout << "Running with " << opt.criterion << " …\n";
 
-    // 3. 运行
-    runSingleTreeApp(opts);
+    /* -------- 计时 -------- */
+    auto t0 = std::chrono::steady_clock::now();
+
+    runSingleTreeApp(opt);
+
+    auto t1 = std::chrono::steady_clock::now();
+    double seconds =
+        std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
+
+    std::cout << "Total time: " << seconds << " s\n";
     return 0;
 }

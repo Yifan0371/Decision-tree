@@ -3,6 +3,11 @@
 #include "pipeline/DataSplit.hpp"
 #include "app/SingleTreeApp.hpp"
 #include "criterion/MSECriterion.hpp"
+#include "criterion/MAECriterion.hpp"
+#include "criterion/HuberCriterion.hpp"
+#include "criterion/QuantileCriterion.hpp"
+#include "criterion/LogCoshCriterion.hpp"
+#include "criterion/PoissonCriterion.hpp"
 #include "finder/ExhaustiveSplitFinder.hpp"
 #include "pruner/NoPruner.hpp"
 #include <iostream>
@@ -19,7 +24,33 @@ void runSingleTreeApp(const ProgramOptions& opts) {
 
     // 3. 构造策略并训练
     auto finder    = std::make_unique<ExhaustiveSplitFinder>();
-    auto criterion = std::make_unique<MSECriterion>();
+    // 3. 构造准则
+    std::unique_ptr<ISplitCriterion> criterion;
+    const std::string crit = opts.criterion;
+
+    if (crit == "mae")
+        criterion = std::make_unique<MAECriterion>();
+
+    else if (crit == "huber")
+        criterion = std::make_unique<HuberCriterion>();               // 默认 δ=1.0
+
+    else if (crit.rfind("quantile", 0) == 0) {                        // 形如 quantile:0.9
+        double tau = 0.5;
+        auto pos = crit.find(':');
+        if (pos != std::string::npos)
+            tau = std::stod(crit.substr(pos + 1));
+        criterion = std::make_unique<QuantileCriterion>(tau);
+    }
+
+    else if (crit == "logcosh")
+        criterion = std::make_unique<LogCoshCriterion>();
+
+    else if (crit == "poisson")
+        criterion = std::make_unique<PoissonCriterion>();
+
+    else   // 默认 MSE
+        criterion = std::make_unique<MSECriterion>();
+
     auto pruner    = std::make_unique<NoPruner>();
 
     SingleTreeTrainer trainer(std::move(finder),

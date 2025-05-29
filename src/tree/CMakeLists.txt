@@ -1,6 +1,11 @@
 # 决策树核心模块，包含 criterion、finder、pruner、trainer
 add_library(DecisionTree_lib
     criterion/MSECriterion.cpp
+    criterion/MAECriterion.cpp
+    criterion/HuberCriterion.cpp
+    criterion/QuantileCriterion.cpp
+    criterion/LogCoshCriterion.cpp
+    criterion/PoissonCriterion.cpp
     finder/ExhaustiveSplitFinder.cpp
     pruner/NoPruner.cpp
     trainer/SingleTreeTrainer.cpp
