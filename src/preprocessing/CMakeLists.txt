@@ -1,10 +1,8 @@
 # src/preprocessing/CMakeLists.txt
-
-add_library(preprocessing
+add_library(DataCleaner_lib
     DataCleaner.cpp
 )
 
-# 这里要把顶层 include/ 目录加入搜索路径
-target_include_directories(preprocessing PUBLIC
+target_include_directories(DataCleaner_lib PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )

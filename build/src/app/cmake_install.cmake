@@ -1,4 +1,4 @@
-# Install script for directory: /home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/src/app
+# Install script for directory: /home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree/src/app
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

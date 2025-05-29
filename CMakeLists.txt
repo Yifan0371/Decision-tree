@@ -1,16 +1,18 @@
 cmake_minimum_required(VERSION 3.10)
-project(DecisionTree LANGUAGES CXX)
+project(DecisionTree)
 
-# C++ 标准
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 全局优化和警告选项
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -Wall -Wextra")
+# —— 全局编译选项 —— 
+# -O3 优化等级最高
+# -march=native 针对本机架构
+# -Wall -Wextra 打开常见警告
+add_compile_options(-O3 -march=native -Wall -Wextra)
 
-# 将所有可执行文件输出到 build/bin
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+# 把 include/ 加到头文件搜索路径
+include_directories(${PROJECT_SOURCE_DIR}/include)
 
-# 子模块
-add_subdirectory(src/preprocessing)
-add_subdirectory(src/app)
+# 将 src 子目录也纳入构建
+add_subdirectory(src)

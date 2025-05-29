@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree
+CMAKE_SOURCE_DIR = /home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build
+CMAKE_BINARY_DIR = /home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/CMakeFiles /home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree/build/CMakeFiles /home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -117,17 +117,82 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named preprocessing
+# Target rules for targets named DecisionTreeMain
 
 # Build rule for target.
-preprocessing: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 preprocessing
-.PHONY : preprocessing
+DecisionTreeMain: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DecisionTreeMain
+.PHONY : DecisionTreeMain
 
 # fast build rule for target.
-preprocessing/fast:
-	$(MAKE) $(MAKESILENT) -f src/preprocessing/CMakeFiles/preprocessing.dir/build.make src/preprocessing/CMakeFiles/preprocessing.dir/build
-.PHONY : preprocessing/fast
+DecisionTreeMain/fast:
+	$(MAKE) $(MAKESILENT) -f src/CMakeFiles/DecisionTreeMain.dir/build.make src/CMakeFiles/DecisionTreeMain.dir/build
+.PHONY : DecisionTreeMain/fast
+
+#=============================================================================
+# Target rules for targets named DataCleaner_lib
+
+# Build rule for target.
+DataCleaner_lib: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DataCleaner_lib
+.PHONY : DataCleaner_lib
+
+# fast build rule for target.
+DataCleaner_lib/fast:
+	$(MAKE) $(MAKESILENT) -f src/preprocessing/CMakeFiles/DataCleaner_lib.dir/build.make src/preprocessing/CMakeFiles/DataCleaner_lib.dir/build
+.PHONY : DataCleaner_lib/fast
+
+#=============================================================================
+# Target rules for targets named DataIO_lib
+
+# Build rule for target.
+DataIO_lib: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DataIO_lib
+.PHONY : DataIO_lib
+
+# fast build rule for target.
+DataIO_lib/fast:
+	$(MAKE) $(MAKESILENT) -f src/functions/io/CMakeFiles/DataIO_lib.dir/build.make src/functions/io/CMakeFiles/DataIO_lib.dir/build
+.PHONY : DataIO_lib/fast
+
+#=============================================================================
+# Target rules for targets named DataSplit_lib
+
+# Build rule for target.
+DataSplit_lib: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DataSplit_lib
+.PHONY : DataSplit_lib
+
+# fast build rule for target.
+DataSplit_lib/fast:
+	$(MAKE) $(MAKESILENT) -f src/pipeline/CMakeFiles/DataSplit_lib.dir/build.make src/pipeline/CMakeFiles/DataSplit_lib.dir/build
+.PHONY : DataSplit_lib/fast
+
+#=============================================================================
+# Target rules for targets named DecisionTree_lib
+
+# Build rule for target.
+DecisionTree_lib: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DecisionTree_lib
+.PHONY : DecisionTree_lib
+
+# fast build rule for target.
+DecisionTree_lib/fast:
+	$(MAKE) $(MAKESILENT) -f src/tree/CMakeFiles/DecisionTree_lib.dir/build.make src/tree/CMakeFiles/DecisionTree_lib.dir/build
+.PHONY : DecisionTree_lib/fast
+
+#=============================================================================
+# Target rules for targets named SingleTreeApp_lib
+
+# Build rule for target.
+SingleTreeApp_lib: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SingleTreeApp_lib
+.PHONY : SingleTreeApp_lib
+
+# fast build rule for target.
+SingleTreeApp_lib/fast:
+	$(MAKE) $(MAKESILENT) -f src/app/CMakeFiles/SingleTreeApp_lib.dir/build.make src/app/CMakeFiles/SingleTreeApp_lib.dir/build
+.PHONY : SingleTreeApp_lib/fast
 
 #=============================================================================
 # Target rules for targets named DataCleanApp
@@ -151,7 +216,12 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... DataCleanApp"
-	@echo "... preprocessing"
+	@echo "... DataCleaner_lib"
+	@echo "... DataIO_lib"
+	@echo "... DataSplit_lib"
+	@echo "... DecisionTreeMain"
+	@echo "... DecisionTree_lib"
+	@echo "... SingleTreeApp_lib"
 .PHONY : help
 
 

@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE
-  "../../bin/DataCleanApp"
-  "../../bin/DataCleanApp.pdb"
+  "../../DataCleanApp"
+  "../../DataCleanApp.pdb"
   "CMakeFiles/DataCleanApp.dir/DataCleanApp.cpp.o"
   "CMakeFiles/DataCleanApp.dir/DataCleanApp.cpp.o.d"
 )

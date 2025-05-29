@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/yifan/桌面/CHPS_M1/ppn重启/5-29/Decision-tree/include
+CXX_INCLUDES = -I/home/yifan/桌面/CHPS_M1/ppn重启/5-29-2老代码嫁接/Decision-tree/include
 
-CXX_FLAGS =  -O3 -march=native -Wall -Wextra -std=c++17
+CXX_FLAGS = -std=c++17 -O3 -march=native -Wall -Wextra
 
