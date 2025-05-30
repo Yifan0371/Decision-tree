@@ -11,6 +11,11 @@ struct Node {
     bool   isLeaf      = false;
     double metric      = 0.0;
     size_t samples     = 0;
+    
+    // 剪枝相关字段
+    double nodeMetric     = 0.0;  // 节点训练误差（用于后剪枝计算）
+    double nodePrediction = 0.0;  // 节点叶均值/中位数（用于剪枝后的预测值）
+    
     std::unique_ptr<Node> left  = nullptr;
     std::unique_ptr<Node> right = nullptr;
 };

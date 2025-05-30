@@ -5,13 +5,16 @@
 #include "../ISplitFinder.hpp"
 #include "../ISplitCriterion.hpp"
 #include "../IPruner.hpp"
+#include "../../pruner/MinGainPrePruner.hpp"  // for dynamic_cast
 #include <memory>
+#include <vector>
+#include <iostream>
 
 class SingleTreeTrainer : public ITreeTrainer {
 public:
     SingleTreeTrainer(std::unique_ptr<ISplitFinder>   finder,
                       std::unique_ptr<ISplitCriterion> criterion,
-                      std::unique_ptr<IPruner>       pruner,
+                      std::unique_ptr<IPruner>         pruner,
                       int maxDepth,
                       int minSamplesLeaf);
 
@@ -36,15 +39,17 @@ private:
                    const std::vector<int>& indices,
                    int depth);
 
-    // 计算树统计信息的辅助函数
-    void calculateTreeStats(const Node* node, int currentDepth, 
-                           int& maxDepth, int& leafCount) const;
+    void calculateTreeStats(const Node* node,
+                            int currentDepth,
+                            int& maxDepth,
+                            int& leafCount) const;
 
     int  maxDepth_;
     int  minSamplesLeaf_;
-    std::unique_ptr<ISplitFinder>   finder_;
+    std::unique_ptr<ISplitFinder>    finder_;
     std::unique_ptr<ISplitCriterion> criterion_;
-    std::unique_ptr<IPruner>        pruner_;
+    std::unique_ptr<IPruner>         pruner_;
+    std::unique_ptr<Node>            root_;
 };
 
 #endif // TREE_SINGLE_TRAINER_HPP

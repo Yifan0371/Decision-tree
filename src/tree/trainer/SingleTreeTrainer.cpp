@@ -1,6 +1,6 @@
-
 #include "tree/trainer/SingleTreeTrainer.hpp"
 #include "tree/Node.hpp"
+#include "pruner/MinGainPrePruner.hpp"
 #include <numeric>
 #include <cmath>
 #include <iostream>
@@ -24,6 +24,8 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     std::iota(indices.begin(), indices.end(), 0);
     
     splitNode(root_.get(), data, rowLength, labels, indices, 0);
+    
+    // 训练完成后调用后剪枝
     pruner_->prune(root_);
     
     // 简化的统计信息输出
@@ -40,31 +42,42 @@ void SingleTreeTrainer::splitNode(Node* node,
                                   int depth) {
     node->metric  = criterion_->nodeMetric(labels, indices);
     node->samples = indices.size();
+    
+    // 计算节点预测值（均值）用于剪枝
+    double sum = 0;
+    for (int idx : indices) sum += labels[idx];
+    node->nodePrediction = sum / indices.size();
+    node->nodeMetric = node->metric;  // 保存节点误差用于后剪枝
 
-    // 停止条件检查（无调试输出）
+    // 停止条件检查
     if (depth >= maxDepth_ || 
         indices.size() < 2 * (size_t)minSamplesLeaf_) {
         node->isLeaf = true;
-        double sum = 0;
-        for (int idx : indices) sum += labels[idx];
-        node->prediction = sum / indices.size();
+        node->prediction = node->nodePrediction;
         return;
     }
 
     // 寻找最佳分裂
     int   bestFeat;
-    double bestThr, bestImp;
-    std::tie(bestFeat, bestThr, bestImp) =
+    double bestThr, bestGain;
+    std::tie(bestFeat, bestThr, bestGain) =
         finder_->findBestSplit(data, rowLength, labels, indices,
                                node->metric, *criterion_);
 
     // 检查分裂有效性
-    if (bestFeat < 0 || bestImp <= 0) {
+    if (bestFeat < 0 || bestGain <= 0) {
         node->isLeaf = true;
-        double sum = 0;
-        for (int idx : indices) sum += labels[idx];
-        node->prediction = sum / indices.size();
+        node->prediction = node->nodePrediction;
         return;
+    }
+
+    // **预剪枝检查**：如果是 MinGainPrePruner，检查增益阈值
+    if (auto* prePruner = dynamic_cast<const MinGainPrePruner*>(pruner_.get())) {
+        if (bestGain < prePruner->minGain()) {
+            node->isLeaf = true;
+            node->prediction = node->nodePrediction;
+            return;
+        }
     }
 
     // 设置分裂信息
@@ -83,9 +96,7 @@ void SingleTreeTrainer::splitNode(Node* node,
     if (leftIdx.size() < (size_t)minSamplesLeaf_ || 
         rightIdx.size() < (size_t)minSamplesLeaf_) {
         node->isLeaf = true;
-        double sum = 0;
-        for (int idx : indices) sum += labels[idx];
-        node->prediction = sum / indices.size();
+        node->prediction = node->nodePrediction;
         return;
     }
 

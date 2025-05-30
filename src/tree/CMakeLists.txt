@@ -14,6 +14,9 @@ add_library(DecisionTree_lib
     finder/AdaptiveEWFinder.cpp
     finder/AdaptiveEQFinder.cpp
     pruner/NoPruner.cpp
+    pruner/MinGainPrePruner.cpp
+    pruner/CostComplexityPruner.cpp
+    pruner/ReducedErrorPruner.cpp
     trainer/SingleTreeTrainer.cpp
 )
 
@@ -21,4 +24,3 @@ target_include_directories(DecisionTree_lib PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
 
-# 如果未来 SplitFinder 或 Criterion 有依赖，也在这里 link
