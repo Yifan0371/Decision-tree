@@ -1,0 +1,3 @@
+Data: ../../data/data_clean/cleaned_data.csv | Depth: 20 | MinLeaf: 5 | Criterion: mse | Split: random:20 | Pruner: none
+Tree: depth=19, leaves=707 | Pruner: none
+MSE: 0.000270 | MAE: 0.008271 | Train: 320ms | Total: 367ms

@@ -4,6 +4,7 @@
 #include <numeric>
 #include <cmath>
 #include <iostream>
+#include <algorithm>
 
 SingleTreeTrainer::SingleTreeTrainer(std::unique_ptr<ISplitFinder>   finder,
                                      std::unique_ptr<ISplitCriterion> criterion,
@@ -23,7 +24,8 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     std::vector<int> indices(labels.size());
     std::iota(indices.begin(), indices.end(), 0);
     
-    splitNode(root_.get(), data, rowLength, labels, indices, 0);
+    // 使用就地划分的递归分裂
+    splitNodeInPlace(root_.get(), data, rowLength, labels, indices, 0);
     
     // 训练完成后调用后剪枝
     pruner_->prune(root_);
@@ -34,26 +36,30 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     std::cout << "Tree: depth=" << treeDepth << ", leaves=" << leafCount;
 }
 
-void SingleTreeTrainer::splitNode(Node* node,
-                                  const std::vector<double>& data,
-                                  int rowLength,
-                                  const std::vector<double>& labels,
-                                  const std::vector<int>& indices,
-                                  int depth) {
+void SingleTreeTrainer::splitNodeInPlace(Node* node,
+                                         const std::vector<double>& data,
+                                         int rowLength,
+                                         const std::vector<double>& labels,
+                                         std::vector<int>& indices,  // 注意：非const引用，允许就地修改
+                                         int depth) {
+    if (indices.empty()) {
+        node->makeLeaf(0.0);
+        return;
+    }
+    
     node->metric  = criterion_->nodeMetric(labels, indices);
     node->samples = indices.size();
     
-    // 计算节点预测值（均值）用于剪枝
+    // 计算节点预测值（均值）
     double sum = 0;
     for (int idx : indices) sum += labels[idx];
-    node->nodePrediction = sum / indices.size();
-    node->nodeMetric = node->metric;  // 保存节点误差用于后剪枝
-
+    double nodePrediction = sum / indices.size();
+    
     // 停止条件检查
     if (depth >= maxDepth_ || 
-        indices.size() < 2 * (size_t)minSamplesLeaf_) {
-        node->isLeaf = true;
-        node->prediction = node->nodePrediction;
+        indices.size() < 2 * static_cast<size_t>(minSamplesLeaf_) ||
+        indices.size() < 2) {
+        node->makeLeaf(nodePrediction, nodePrediction);
         return;
     }
 
@@ -66,56 +72,66 @@ void SingleTreeTrainer::splitNode(Node* node,
 
     // 检查分裂有效性
     if (bestFeat < 0 || bestGain <= 0) {
-        node->isLeaf = true;
-        node->prediction = node->nodePrediction;
+        node->makeLeaf(nodePrediction, nodePrediction);
         return;
     }
 
     // **预剪枝检查**：如果是 MinGainPrePruner，检查增益阈值
     if (auto* prePruner = dynamic_cast<const MinGainPrePruner*>(pruner_.get())) {
         if (bestGain < prePruner->minGain()) {
-            node->isLeaf = true;
-            node->prediction = node->nodePrediction;
+            node->makeLeaf(nodePrediction, nodePrediction);
             return;
         }
     }
 
-    // 设置分裂信息
-    node->featureIndex = bestFeat;
-    node->threshold    = bestThr;
-
-    // 根据最佳分裂点划分数据
-    std::vector<int> leftIdx, rightIdx;
-    for (int idx : indices) {
-        double v = data[idx * rowLength + bestFeat];
-        if (v <= bestThr) leftIdx.push_back(idx);
-        else              rightIdx.push_back(idx);
-    }
-
+    // **关键优化：使用std::partition进行就地划分**
+    auto partitionPoint = std::partition(indices.begin(), indices.end(),
+        [&](int idx) {
+            return data[idx * rowLength + bestFeat] <= bestThr;
+        });
+    
+    // 计算左右子集大小
+    size_t leftSize = std::distance(indices.begin(), partitionPoint);
+    size_t rightSize = indices.size() - leftSize;
+    
     // 检查分裂后样本数约束
-    if (leftIdx.size() < (size_t)minSamplesLeaf_ || 
-        rightIdx.size() < (size_t)minSamplesLeaf_) {
-        node->isLeaf = true;
-        node->prediction = node->nodePrediction;
+    if (leftSize < static_cast<size_t>(minSamplesLeaf_) || 
+        rightSize < static_cast<size_t>(minSamplesLeaf_)) {
+        node->makeLeaf(nodePrediction, nodePrediction);
         return;
     }
 
-    // 创建子节点并递归分裂
-    node->left  = std::make_unique<Node>();
-    node->right = std::make_unique<Node>();
+    // 设置为内部节点
+    node->makeInternal(bestFeat, bestThr);
+    
+    // 创建子节点
+    node->leftChild  = std::make_unique<Node>();
+    node->rightChild = std::make_unique<Node>();
+    
+    // 更新union中的指针（用于访问）
+    node->info.internal.left = node->leftChild.get();
+    node->info.internal.right = node->rightChild.get();
 
-    splitNode(node->left.get(),  data, rowLength, labels, leftIdx,  depth + 1);
-    splitNode(node->right.get(), data, rowLength, labels, rightIdx, depth + 1);
+    // **内存优化：使用临时向量避免重复分配**
+    // 创建左子集索引（复制左半部分）
+    std::vector<int> leftIndices(indices.begin(), partitionPoint);
+    
+    // 创建右子集索引（复制右半部分）
+    std::vector<int> rightIndices(partitionPoint, indices.end());
+    
+    // 递归处理子节点
+    splitNodeInPlace(node->leftChild.get(),  data, rowLength, labels, leftIndices,  depth + 1);
+    splitNodeInPlace(node->rightChild.get(), data, rowLength, labels, rightIndices, depth + 1);
 }
 
 double SingleTreeTrainer::predict(const double* sample,
                                   int /* rowLength */) const {
     const Node* cur = root_.get();
     while (!cur->isLeaf) {
-        double v = sample[cur->featureIndex];
-        cur = (v <= cur->threshold ? cur->left.get() : cur->right.get());
+        double v = sample[cur->getFeatureIndex()];
+        cur = (v <= cur->getThreshold()) ? cur->getLeft() : cur->getRight();
     }
-    return cur->prediction;
+    return cur->getPrediction();
 }
 
 void SingleTreeTrainer::evaluate(const std::vector<double>& X,
@@ -144,7 +160,19 @@ void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth,
     if (node->isLeaf) {
         leafCount++;
     } else {
-        calculateTreeStats(node->left.get(), currentDepth + 1, maxDepth, leafCount);
-        calculateTreeStats(node->right.get(), currentDepth + 1, maxDepth, leafCount);
+        calculateTreeStats(node->getLeft(), currentDepth + 1, maxDepth, leafCount);
+        calculateTreeStats(node->getRight(), currentDepth + 1, maxDepth, leafCount);
     }
+}
+
+// 保留原有splitNode方法以维持API兼容性（内部调用优化版本）
+void SingleTreeTrainer::splitNode(Node* node,
+                                  const std::vector<double>& data,
+                                  int rowLength,
+                                  const std::vector<double>& labels,
+                                  const std::vector<int>& indices,
+                                  int depth) {
+    // 创建索引的副本以供就地修改
+    std::vector<int> mutableIndices = indices;
+    splitNodeInPlace(node, data, rowLength, labels, mutableIndices, depth);
 }

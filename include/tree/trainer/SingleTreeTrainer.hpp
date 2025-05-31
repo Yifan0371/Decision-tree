@@ -32,12 +32,21 @@ public:
                   double& mae) override;
 
 private:
+    // 原有方法（保持API兼容性）
     void splitNode(Node* node,
                    const std::vector<double>& data,
                    int rowLength,
                    const std::vector<double>& labels,
                    const std::vector<int>& indices,
                    int depth);
+
+    // **新增：内存优化的就地划分方法**
+    void splitNodeInPlace(Node* node,
+                          const std::vector<double>& data,
+                          int rowLength,
+                          const std::vector<double>& labels,
+                          std::vector<int>& indices,  // 非const引用，允许就地修改
+                          int depth);
 
     void calculateTreeStats(const Node* node,
                             int currentDepth,

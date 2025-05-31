@@ -1,0 +1,3 @@
+Data: ../../data/data_clean/cleaned_data.csv | Depth: 20 | MinLeaf: 5 | Criterion: mse | Split: adaptive_ew:rice | Pruner: none
+Tree: depth=19, leaves=1059 | Pruner: none
+MSE: 0.000278 | MAE: 0.008347 | Train: 124ms | Total: 162ms

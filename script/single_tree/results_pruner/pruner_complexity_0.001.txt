@@ -1,0 +1,3 @@
+Data: ../../data/data_clean/cleaned_data.csv | Depth: 20 | MinLeaf: 5 | Criterion: mse | Split: exhaustive | Pruner: cost_complexity(0.001)
+Tree: depth=15, leaves=229 | Pruner: cost_complexity(0.001)
+MSE: 0.001312 | MAE: 0.029007 | Train: 127ms | Total: 168ms
