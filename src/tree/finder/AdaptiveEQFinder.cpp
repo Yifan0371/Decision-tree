@@ -1,114 +1,104 @@
 #include "finder/AdaptiveEQFinder.hpp"
+
 #include <algorithm>
-#include <limits>
 #include <cmath>
+#include <limits>
 #include <numeric>
+#include <vector>
 
-double AdaptiveEQFinder::calculateVariability(const std::vector<double>& values) const {
-    if (values.size() <= 1) return 0.0;
-    
-    double mean = std::accumulate(values.begin(), values.end(), 0.0) / values.size();
-    double variance = 0.0;
-    for (double v : values) {
-        variance += (v - mean) * (v - mean);
-    }
-    variance /= values.size();
-    
-    // 返回变异系数（标准差/均值）
-    return std::sqrt(variance) / (std::abs(mean) + 1e-12);
+/*=== 工具函数 =============================================================*/
+static double coeffOfVariation(const std::vector<double>& v)
+{
+    if (v.size() <= 1) return 0.0;
+    const double mean = std::accumulate(v.begin(), v.end(), 0.0) / v.size();
+    double var = 0.0;
+    for (double x : v) var += (x - mean) * (x - mean);
+    var /= v.size();
+    return std::sqrt(var) / (std::fabs(mean) + 1e-12);
 }
 
-std::pair<int, int> AdaptiveEQFinder::calculateOptimalFrequencyParams(
-    const std::vector<double>& values) const
+/*=== AdaptiveEQFinder 私有辅助 ===========================================*/
+std::pair<int,int>
+AdaptiveEQFinder::calculateOptimalFrequencyParams(const std::vector<double>& v) const
 {
-    int n = static_cast<int>(values.size());
-    
-    // 计算数据的变异性
-    double variability = calculateVariability(values);
-    
-    // 根据变异性调整策略
-    int optimalBins;
-    int samplesPerBin;
-    
-    if (variability < variabilityThreshold_) {
-        // 低变异性：使用较少的箱子，每箱更多样本
-        optimalBins = std::max(4, std::min(16, static_cast<int>(std::sqrt(n) / 2)));
-        samplesPerBin = std::max(minSamplesPerBin_ * 2, n / optimalBins);
-    } else {
-        // 高变异性：使用更多箱子，允许较少样本
-        optimalBins = std::max(8, std::min(maxBins_, static_cast<int>(std::sqrt(n))));
-        samplesPerBin = std::max(minSamplesPerBin_, n / optimalBins);
-    }
-    
-    // 确保至少有2个箱子
-    optimalBins = std::max(2, optimalBins);
-    
-    // 根据最小样本数约束调整箱数
-    int maxPossibleBins = n / minSamplesPerBin_;
-    optimalBins = std::min(optimalBins, maxPossibleBins);
-    
-    return {optimalBins, samplesPerBin};
+    const int n  = static_cast<int>(v.size());
+    const double cv = coeffOfVariation(v);
+
+    int bins = (cv < variabilityThreshold_)
+             ? std::max(4, std::min(16, static_cast<int>(std::sqrt(n) / 2)))
+             : std::max(8, std::min(maxBins_, static_cast<int>(std::sqrt(n))));
+    bins = std::clamp(bins, 2, n / std::max(1, minSamplesPerBin_));  // 至少 2 盒
+
+    int perBin = std::max(minSamplesPerBin_, n / bins);
+    return {bins, perBin};
 }
 
-std::tuple<int,double,double> AdaptiveEQFinder::findBestSplit(
-    const std::vector<double>& X, int D,
-    const std::vector<double>& y,
-    const std::vector<int>& idx,
-    double parentMetric,
-    const ISplitCriterion& crit) const
+/*=== findBestSplit =======================================================*/
+std::tuple<int,double,double>
+AdaptiveEQFinder::findBestSplit(const std::vector<double>& data,
+                                int                       rowLen,
+                                const std::vector<double>&labels,
+                                const std::vector<int>&   idx,
+                                double                    parentMetric,
+                                const ISplitCriterion&    criterion) const
 {
-    int bestFeat = -1; 
-    double bestThr = 0, bestGain = -std::numeric_limits<double>::infinity();
-    
-    for (int f = 0; f < D; ++f) {
-        // 提取特征值
-        std::vector<double> values;
-        values.reserve(idx.size());
-        
-        for (int i : idx) {
-            values.push_back(X[i*D+f]);
-        }
-        
-        // 计算自适应参数
-        auto [optimalBins, samplesPerBin] = calculateOptimalFrequencyParams(values);
-        
-        // 创建排序的(值,索引)对
-        std::vector<std::pair<double, int>> pairs;
-        pairs.reserve(idx.size());
-        for (int i : idx) pairs.emplace_back(X[i*D+f], i);
-        std::sort(pairs.begin(), pairs.end());
-        
-        if (static_cast<int>(pairs.size()) < 2 * minSamplesPerBin_) continue;
-        
-        // 动态调整每箱样本数，确保能产生有意义的分割
-        int actualSamplesPerBin = std::max(minSamplesPerBin_, 
-                                          static_cast<int>(pairs.size()) / optimalBins);
-        
-        // 尝试不同的分割点
-        for (size_t pivot = static_cast<size_t>(actualSamplesPerBin); 
-             pivot < pairs.size() - static_cast<size_t>(actualSamplesPerBin); 
-             pivot += static_cast<size_t>(actualSamplesPerBin)) {
-                
-            std::vector<int> leftIdx, rightIdx;
-            leftIdx.reserve(pivot);
-            rightIdx.reserve(pairs.size() - pivot);
-            
-            for (size_t i = 0; i < pivot; ++i) 
-                leftIdx.push_back(pairs[i].second);
-            for (size_t i = pivot; i < pairs.size(); ++i) 
-                rightIdx.push_back(pairs[i].second);
-                
-            if (static_cast<int>(leftIdx.size()) < minSamplesPerBin_ || 
-                static_cast<int>(rightIdx.size()) < minSamplesPerBin_) continue;
-            
-            double mL = crit.nodeMetric(y, leftIdx);
-            double mR = crit.nodeMetric(y, rightIdx);
-            double gain = parentMetric - (mL*leftIdx.size() + mR*rightIdx.size()) / idx.size();
-            
+    const size_t N = idx.size();
+    if (N < static_cast<size_t>(2 * minSamplesPerBin_)) return {-1, 0.0, 0.0};
+
+    int    bestFeat = -1;
+    double bestThr  = 0.0;
+    double bestGain = -std::numeric_limits<double>::infinity();
+
+    std::vector<double> values; values.reserve(N);
+    std::vector<int>    sortedIdx(N);
+    std::vector<int>    leftBuf, rightBuf;
+    leftBuf.reserve(N);
+    rightBuf.reserve(N);
+
+    const double EPS = 1e-12;
+
+    for (int f = 0; f < rowLen; ++f) {
+
+        /* 1. 收集当前特征值 */
+        values.clear();
+        for (int i : idx) values.emplace_back(data[i * rowLen + f]);
+
+        /* 2. 计算自适应等频参数 */
+        const auto [bins, perBin] = calculateOptimalFrequencyParams(values);
+        if (N < static_cast<size_t>(2 * perBin)) continue;
+
+        /* 3. 索引排序（避免 pair 复制） */
+        std::copy(idx.begin(), idx.end(), sortedIdx.begin());
+        std::sort(sortedIdx.begin(), sortedIdx.end(),
+                  [&](int a, int b) {
+                      return data[a * rowLen + f] < data[b * rowLen + f];
+                  });
+
+        /* 4. 枚举等频分割 */
+        for (size_t pivot = perBin;
+             pivot <= N - perBin;
+             pivot += perBin)
+        {
+            const double vL = data[sortedIdx[pivot - 1] * rowLen + f];
+            const double vR = data[sortedIdx[pivot]     * rowLen + f];
+            if (std::fabs(vR - vL) < EPS) continue;      // 相同值无效
+
+            leftBuf.assign(sortedIdx.begin(),          sortedIdx.begin() + pivot);
+            rightBuf.assign(sortedIdx.begin() + pivot, sortedIdx.end());
+
+            if (leftBuf.size()  < static_cast<size_t>(minSamplesPerBin_) ||
+                rightBuf.size() < static_cast<size_t>(minSamplesPerBin_))
+                continue;
+
+            const double mL = criterion.nodeMetric(labels, leftBuf);
+            const double mR = criterion.nodeMetric(labels, rightBuf);
+            const double gain = parentMetric -
+                (mL * leftBuf.size() + mR * rightBuf.size()) / static_cast<double>(N);
+
             if (gain > bestGain) {
                 bestGain = gain;
                 bestFeat = f;
-                bestThr = 0.5 * (pairs[pivot-1].first + pairs[pivot].first);
+                bestThr  = 0.5 * (vL + vR);
             }
         }
     }

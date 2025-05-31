@@ -1,98 +1,101 @@
+/*  ExhaustiveSplitFinder.cpp  */
 #include "finder/ExhaustiveSplitFinder.hpp"
+
 #include <algorithm>
-#include <tuple>
+#include <cmath>
 #include <limits>
+#include <numeric>
+#include <vector>
 
 std::tuple<int, double, double>
 ExhaustiveSplitFinder::findBestSplit(const std::vector<double>& data,
-                                     int rowLength,
-                                     const std::vector<double>& labels,
-                                     const std::vector<int>& indices,
-                                     double currentMetric,
-                                     const ISplitCriterion& criterion) const {
-    
-    if (indices.size() < 2) {
-        return {-1, 0.0, 0.0};
-    }
-    
-    int    bestFeat = -1;
-    double bestThr  = 0.0;
-    double bestGain = 0.0;
-    size_t N = indices.size();
-    
-    // 预计算父节点的总和与平方和
-    double totalSum = 0.0;
+                                     int                         rowLength,
+                                     const std::vector<double>&  labels,
+                                     const std::vector<int>&     indices,
+                                     double                      /*currentMetric*/,
+                                     const ISplitCriterion&      /*criterion*/) const
+{
+    const size_t N = indices.size();
+    if (N < 2) return {-1, 0.0, 0.0};
+
+    /* ---------- 统计父节点信息 ---------- */
+    double totalSum   = 0.0;
     double totalSumSq = 0.0;
     for (int idx : indices) {
-        double y = labels[idx];
-        totalSum += y;
+        const double y = labels[idx];
+        totalSum   += y;
         totalSumSq += y * y;
     }
-    
-    // 父节点的MSE（应该等于currentMetric）
-    double parentMSE = totalSumSq / N - (totalSum / N) * (totalSum / N);
-    
-    // 遍历所有特征
+    const double parentMSE = totalSumSq / N - std::pow(totalSum / N, 2);
+
+    /* ---------- 预分配临时缓冲区 ---------- */
+    std::vector<int>    sortedIdx(N);
+    std::vector<double> prefixSum(N);
+    std::vector<double> prefixSumSq(N);
+
+    /* ---------- 搜索所有特征 ---------- */
+    int    bestFeat  = -1;
+    double bestThr   = 0.0;
+    double bestGain  = 0.0;
+    const  double EPS = 1e-12;
+
     for (int f = 0; f < rowLength; ++f) {
-        // 创建 (特征值, 索引) 对并排序
-        std::vector<std::pair<double, int>> sortedPairs;
-        sortedPairs.reserve(indices.size());
-        
-        for (int idx : indices) {
-            sortedPairs.emplace_back(data[idx * rowLength + f], idx);
+
+        /* --- 将当前 indices 拷贝到工作数组并按特征值排序（仅排序索引） --- */
+        std::copy(indices.begin(), indices.end(), sortedIdx.begin());
+
+        std::sort(sortedIdx.begin(), sortedIdx.end(),
+                  [&](int a, int b) {
+                      return data[a * rowLength + f] < data[b * rowLength + f];
+                  });
+
+        /* --- 计算前缀和 / 平方和 --- */
+        {
+            double runningSum   = 0.0;
+            double runningSumSq = 0.0;
+            for (size_t i = 0; i < N; ++i) {
+                const double y = labels[sortedIdx[i]];
+                runningSum   += y;
+                runningSumSq += y * y;
+                prefixSum[i]   = runningSum;
+                prefixSumSq[i] = runningSumSq;
+            }
         }
-        
-        std::sort(sortedPairs.begin(), sortedPairs.end());
-        
-        // 使用前缀和技巧进行增量计算
-        double leftSum = 0.0;
-        double leftSumSq = 0.0;
-        size_t leftCount = 0;
-        
-        // 遍历所有可能的分割点
-        for (size_t i = 0; i < sortedPairs.size() - 1; ++i) {
-            int idx = sortedPairs[i].second;
-            double y = labels[idx];
-            
-            // 将当前样本加入左子集
-            leftSum += y;
-            leftSumSq += y * y;
-            leftCount++;
-            
-            // 检查是否可以在此处分割（特征值不同）
-            double currentVal = sortedPairs[i].first;
-            double nextVal = sortedPairs[i + 1].first;
-            
-            if (std::abs(currentVal - nextVal) < 1e-12) {
-                continue; // 特征值相同，跳过
-            }
-            
-            // 计算右子集的统计量
-            size_t rightCount = N - leftCount;
-            double rightSum = totalSum - leftSum;
-            double rightSumSq = totalSumSq - leftSumSq;
-            
-            if (leftCount == 0 || rightCount == 0) {
-                continue;
-            }
-            
-            // 使用公式计算MSE：MSE = E[y²] - (E[y])²
-            double leftMSE = leftSumSq / leftCount - (leftSum / leftCount) * (leftSum / leftCount);
-            double rightMSE = rightSumSq / rightCount - (rightSum / rightCount) * (rightSum / rightCount);
-            
-            // 计算加权平均MSE
-            double weightedMSE = (leftMSE * leftCount + rightMSE * rightCount) / N;
-            
-            // 计算信息增益
-            double gain = parentMSE - weightedMSE;
-            
+
+        /* --- 枚举 N-1 个潜在分割点 --- */
+        for (size_t i = 0; i < N - 1; ++i) {
+            double currentVal = data[sortedIdx[i]     * rowLength + f];
+            double nextVal    = data[sortedIdx[i + 1] * rowLength + f];
+
+            /* 特征值相同 ⇒ 无法切分 */
+            if (std::fabs(currentVal - nextVal) < EPS) continue;
+
+            const size_t leftCount  = i + 1;
+            const size_t rightCount = N - leftCount;
+            if (leftCount == 0 || rightCount == 0) continue;  // 应该不会触发
+
+            /* 左子集统计量（前缀和 O(1) 获取）*/
+            const double leftSum   = prefixSum[i];
+            const double leftSumSq = prefixSumSq[i];
+            /* 右子集统计量 */
+            const double rightSum   = totalSum   - leftSum;
+            const double rightSumSq = totalSumSq - leftSumSq;
+
+            /* 计算左右子集 MSE */
+            const double leftMSE  = leftSumSq  / leftCount  - std::pow(leftSum  / leftCount,  2);
+            const double rightMSE = rightSumSq / rightCount - std::pow(rightSum / rightCount, 2);
+
+            /* 信息增益 = 父节点 MSE - 加权子节点 MSE */
+            const double weightedMSE = (leftMSE * leftCount + rightMSE * rightCount) / N;
+            const double gain        = parentMSE - weightedMSE;
+
             if (gain > bestGain) {
                 bestGain = gain;
                 bestFeat = f;
-                bestThr = 0.5 * (currentVal + nextVal);
+                bestThr  = 0.5 * (currentVal + nextVal);  // 取中值作为阈值
             }
         }
     }
-    
+
     return {bestFeat, bestThr, bestGain};
 }

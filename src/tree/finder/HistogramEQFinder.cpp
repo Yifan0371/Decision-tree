@@ -1,54 +1,76 @@
 #include "finder/HistogramEQFinder.hpp"
-#include <algorithm>
-#include <limits>
 
-std::tuple<int,double,double> HistogramEQFinder::findBestSplit(
-    const std::vector<double>& X, int D,
-    const std::vector<double>& y,
-    const std::vector<int>& idx,
-    double parentMetric,
-    const ISplitCriterion& crit) const
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
+
+std::tuple<int, double, double>
+HistogramEQFinder::findBestSplit(const std::vector<double>& X,   // 行优先特征矩阵
+                                 int                        D,   // 每行特征数
+                                 const std::vector<double>& y,   // 标签
+                                 const std::vector<int>&    idx, // 当前节点样本索引
+                                 double                     parentMetric,
+                                 const ISplitCriterion&     crit) const
 {
-    int bestFeat = -1; 
-    double bestThr = 0, bestGain = -std::numeric_limits<double>::infinity();
-    const int B = bins_;
-    
+    if (idx.size() < 2) return {-1, 0.0, 0.0};
+
+    /* ---------- 预分配可复用缓冲 ---------- */
+    std::vector<int> sortedIdx(idx.size());
+    std::vector<int> leftBuf, rightBuf;
+    leftBuf.reserve(idx.size());
+    rightBuf.reserve(idx.size());
+
+    const int  B   = std::max(1, bins_);
+    const int  per = std::max(1, static_cast<int>(idx.size()) / B);
+    const size_t N = idx.size();
+    const double EPS = 1e-12;
+
+    int    bestFeat = -1;
+    double bestThr  = 0.0;
+    double bestGain = -std::numeric_limits<double>::infinity();
+
+    /* ---------- 遍历每个特征 ---------- */
     for (int f = 0; f < D; ++f) {
-        std::vector<std::pair<double, int>> pairs;
-        pairs.reserve(idx.size());
-        for (int i : idx) pairs.emplace_back(X[i*D+f], i);
-        std::sort(pairs.begin(), pairs.end());
-        
-        if (pairs.size() < 2) continue;
-        
-        int perBucket = std::max(1, static_cast<int>(idx.size()) / B);
-        
-        for (size_t pivot = perBucket; pivot < pairs.size(); pivot += perBucket) {
-            // 确保不会越界
-            if (pivot >= pairs.size()) break;
-            
-            std::vector<int> leftIdx, rightIdx;
-            leftIdx.reserve(pivot);
-            rightIdx.reserve(pairs.size() - pivot);
-            
-            for (size_t i = 0; i < pivot; ++i) 
-                leftIdx.push_back(pairs[i].second);
-            for (size_t i = pivot; i < pairs.size(); ++i) 
-                rightIdx.push_back(pairs[i].second);
-                
-            if (leftIdx.empty() || rightIdx.empty()) continue;
-            
-            double mL = crit.nodeMetric(y, leftIdx);
-            double mR = crit.nodeMetric(y, rightIdx);
-            double gain = parentMetric - (mL*leftIdx.size() + mR*rightIdx.size()) / idx.size();
-            
+
+        /* ---- 拷贝并按特征值排序索引 ---- */
+        std::copy(idx.begin(), idx.end(), sortedIdx.begin());
+        std::sort(sortedIdx.begin(), sortedIdx.end(),
+                  [&](int a, int b) {
+                      return X[a * D + f] < X[b * D + f];
+                  });
+        if (sortedIdx.size() < 2) continue;
+
+        /* ---- 按等频步长遍历 pivot ---- */
+        for (size_t pivot = per; pivot < N; pivot += per) {
+            /* 相邻值相同则跳过（避免零增益分割） */
+            double vL = X[sortedIdx[pivot - 1] * D + f];
+            double vR = X[sortedIdx[pivot]     * D + f];
+            if (std::fabs(vR - vL) < EPS) continue;
+
+            /* --- 构造左右子集索引（缓冲复用） --- */
+            leftBuf.clear();
+            rightBuf.clear();
+
+            leftBuf.insert(leftBuf.end(),
+                           sortedIdx.begin(),
+                           sortedIdx.begin() + pivot);
+            rightBuf.insert(rightBuf.end(),
+                            sortedIdx.begin() + pivot,
+                            sortedIdx.end());
+
+            double mL = crit.nodeMetric(y, leftBuf);
+            double mR = crit.nodeMetric(y, rightBuf);
+            double gain = parentMetric -
+                (mL * leftBuf.size() + mR * rightBuf.size()) / N;
+
             if (gain > bestGain) {
                 bestGain = gain;
                 bestFeat = f;
-                // 在相邻值之间设置阈值
-                bestThr = 0.5 * (pairs[pivot-1].first + pairs[pivot].first);
+                bestThr  = 0.5 * (vL + vR);   // 阈值取中点
             }
         }
     }
+
     return {bestFeat, bestThr, bestGain};
 }

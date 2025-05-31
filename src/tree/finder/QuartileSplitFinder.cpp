@@ -1,59 +1,81 @@
 #include "finder/QuartileSplitFinder.hpp"
+
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <vector>
 
-static double percentile(std::vector<double> v, double q) { // 修正：复制输入向量
-    if (v.empty()) return 0.0;
-    size_t k = static_cast<size_t>(q * (v.size() - 1));
-    if (k >= v.size()) k = v.size() - 1;
-    std::nth_element(v.begin(), v.begin() + k, v.end());
-    return v[k];
-}
-
-std::tuple<int,double,double> QuartileSplitFinder::findBestSplit(
-    const std::vector<double>& X, int D,
-    const std::vector<double>& y,
-    const std::vector<int>& idx,
-    double parentMetric,
-    const ISplitCriterion& crit) const
+std::tuple<int, double, double>
+QuartileSplitFinder::findBestSplit(const std::vector<double>& X,   // 特征矩阵 (行优先)
+                                   int                        D,   // 每行特征数
+                                   const std::vector<double>& y,   // 标签
+                                   const std::vector<int>&    idx, // 当前样本索引
+                                   double                     parentMetric,
+                                   const ISplitCriterion&     crit) const
 {
-    int bestFeat = -1; 
-    double bestThr = 0, bestGain = -std::numeric_limits<double>::infinity();
+    if (idx.size() < 4) return {-1, 0.0, 0.0};   // 数据太少直接返回
+
+    /* ---- 复用缓冲区 ---- */
+    std::vector<double> vals;
+    vals.reserve(idx.size());
+
+    std::vector<int> leftBuf, rightBuf;
+    leftBuf.reserve(idx.size());
+    rightBuf.reserve(idx.size());
+
+    int    bestFeat = -1;
+    double bestThr  = 0.0;
+    double bestGain = -std::numeric_limits<double>::infinity();
 
     for (int f = 0; f < D; ++f) {
-        std::vector<double> vals; 
-        vals.reserve(idx.size());
-        for (int i : idx) vals.push_back(X[i*D+f]);
 
-        if (vals.size() < 4) continue; // 至少需要4个值才能计算四分位数
+        /* -------- 收集当前特征值 -------- */
+        vals.clear();
+        for (int i : idx)
+            vals.emplace_back(X[i * D + f]);
 
-        double q1 = percentile(vals, 0.25);
-        double q2 = percentile(vals, 0.50);
-        double q3 = percentile(vals, 0.75);
+        if (vals.size() < 4) continue;              // 再次保护
 
-        // 去重四分位数
-        std::vector<double> thresholds;
-        thresholds.push_back(q1);
-        if (q2 != q1) thresholds.push_back(q2);
-        if (q3 != q2 && q3 != q1) thresholds.push_back(q3);
+        /* -------- 一次排序直接取四分位 -------- */
+        std::sort(vals.begin(), vals.end());
+        const size_t N       = vals.size();
+        const double q1      = vals[static_cast<size_t>(0.25 * (N - 1))];
+        const double q2      = vals[static_cast<size_t>(0.50 * (N - 1))];
+        const double q3      = vals[static_cast<size_t>(0.75 * (N - 1))];
 
-        for (double thr : thresholds) {
-            std::vector<int> L, R;
+        /* -------- 组织去重后的阈值数组 -------- */
+        double thrList[3];               // 最多 3 个阈值
+        int    thrCnt = 0;
+        thrList[thrCnt++] = q1;
+        if (std::fabs(q2 - q1) > 1e-12)  thrList[thrCnt++] = q2;
+        if (std::fabs(q3 - q2) > 1e-12 && std::fabs(q3 - q1) > 1e-12)  thrList[thrCnt++] = q3;
+
+        /* -------- 依次评估每个阈值 -------- */
+        for (int t = 0; t < thrCnt; ++t) {
+            const double thr = thrList[t];
+
+            leftBuf.clear();
+            rightBuf.clear();
             for (int i : idx) {
-                if (X[i*D+f] <= thr) L.push_back(i);
-                else R.push_back(i);
+                if (X[i * D + f] <= thr)
+                    leftBuf.emplace_back(i);
+                else
+                    rightBuf.emplace_back(i);
             }
-            if (L.empty() || R.empty()) continue;
+            if (leftBuf.empty() || rightBuf.empty()) continue;
 
-            double mL = crit.nodeMetric(y, L);
-            double mR = crit.nodeMetric(y, R);
-            double gain = parentMetric - (mL*L.size() + mR*R.size()) / idx.size();
+            const double mL = crit.nodeMetric(y, leftBuf);
+            const double mR = crit.nodeMetric(y, rightBuf);
+            const double gain = parentMetric -
+                (mL * leftBuf.size() + mR * rightBuf.size()) / idx.size();
+
             if (gain > bestGain) {
-                bestGain = gain; 
-                bestFeat = f; 
-                bestThr = thr;
+                bestGain = gain;
+                bestFeat = f;
+                bestThr  = thr;
             }
         }
     }
+
     return {bestFeat, bestThr, bestGain};
 }

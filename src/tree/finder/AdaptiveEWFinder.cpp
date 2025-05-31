@@ -1,113 +1,127 @@
 #include "finder/AdaptiveEWFinder.hpp"
-#include <algorithm>
-#include <limits>
-#include <cmath>
 
-int AdaptiveEWFinder::calculateOptimalBins(const std::vector<double>& values) const {
-    int n = static_cast<int>(values.size());
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <numeric>
+#include <vector>
+
+/*=== 工具函数 =============================================================*/
+static double interQuartileRange(std::vector<double>& v)
+{
+    if (v.size() < 4) return 0.0;
+    std::sort(v.begin(), v.end());
+    const size_t n = v.size();
+    return v[3 * n / 4] - v[n / 4];
+}
+
+/*=== AdaptiveEWFinder 成员函数 ===========================================*/
+
+int AdaptiveEWFinder::calculateOptimalBins(const std::vector<double>& values) const
+{
+    const int n = static_cast<int>(values.size());
     if (n <= 1) return 1;
-    
+
     int bins = minBins_;
-    
+
     if (rule_ == "sturges") {
-        // Sturges规则: k = ⌈log₂(n)⌉ + 1
         bins = static_cast<int>(std::ceil(std::log2(n))) + 1;
-    }
-    else if (rule_ == "rice") {
-        // Rice规则: k = ⌈2 * ∛n⌉
+    } else if (rule_ == "rice") {
         bins = static_cast<int>(std::ceil(2.0 * std::cbrt(n)));
-    }
-    else if (rule_ == "sqrt") {
-        // 平方根规则: k = ⌈√n⌉
+    } else if (rule_ == "sqrt") {
         bins = static_cast<int>(std::ceil(std::sqrt(n)));
-    }
-    else if (rule_ == "freedman_diaconis") {
-        // Freedman-Diaconis规则: h = 2*IQR/∛n, k = (max-min)/h
-        double iqr = calculateIQR(values);
-        if (iqr > 0) {
-            auto minmax = std::minmax_element(values.begin(), values.end());
-            double range = *minmax.second - *minmax.first;
-            double h = 2.0 * iqr / std::cbrt(n);
-            bins = static_cast<int>(std::ceil(range / h));
+    } else if (rule_ == "freedman_diaconis") {
+        std::vector<double> tmp(values);
+        const double iqr = interQuartileRange(tmp);
+        if (iqr > 0.0) {
+            const auto [mn, mx] = std::minmax_element(tmp.begin(), tmp.end());
+            const double h   = 2.0 * iqr / std::cbrt(n);
+            bins = static_cast<int>(std::ceil((*mx - *mn) / h));
         }
     }
-    
-    // 限制在合理范围内
-    return std::max(minBins_, std::min(maxBins_, bins));
+    return std::clamp(bins, minBins_, maxBins_);
 }
 
-double AdaptiveEWFinder::calculateIQR(std::vector<double> values) const {
-    if (values.size() < 4) return 0.0;
-    
-    std::sort(values.begin(), values.end());
-    size_t n = values.size();
-    
-    // 计算Q1和Q3
-    size_t q1_idx = n / 4;
-    size_t q3_idx = 3 * n / 4;
-    
-    return values[q3_idx] - values[q1_idx];
-}
-
-std::tuple<int,double,double> AdaptiveEWFinder::findBestSplit(
-    const std::vector<double>& X, int D,
-    const std::vector<double>& y,
-    const std::vector<int>& idx,
-    double parentMetric,
-    const ISplitCriterion& crit) const
+/* 备用接口：当前实现未直接调用，可留作外部使用 */
+double AdaptiveEWFinder::calculateIQR(std::vector<double> values) const
 {
-    int bestFeat = -1; 
-    double bestThr = 0, bestGain = -std::numeric_limits<double>::infinity();
-    
-    for (int f = 0; f < D; ++f) {
-        // 提取特征值
-        std::vector<double> values;
-        values.reserve(idx.size());
-        for (int i : idx) values.push_back(X[i*D+f]);
-        
-        // 计算自适应箱数
-        int B = calculateOptimalBins(values);
-        
-        double vmin = *std::min_element(values.begin(), values.end());
-        double vmax = *std::max_element(values.begin(), values.end());
-        if (vmax == vmin) continue;
-        
-        double binWidth = (vmax - vmin) / B;
-        std::vector<std::vector<int>> buckets(B);
-        
-        // 分配样本到桶中
+    return interQuartileRange(values);
+}
+
+/*=== findBestSplit =======================================================*/
+std::tuple<int, double, double>
+AdaptiveEWFinder::findBestSplit(const std::vector<double>& data,
+                                int                       rowLen,
+                                const std::vector<double>&labels,
+                                const std::vector<int>&   idx,
+                                double                    parentMetric,
+                                const ISplitCriterion&    criterion) const
+{
+    if (idx.size() < 2) return {-1, 0.0, 0.0};
+
+    int    bestFeat = -1;
+    double bestThr  = 0.0;
+    double bestGain = -std::numeric_limits<double>::infinity();
+
+    /* 可复用的缓冲区 */
+    std::vector<double>           values;   values.reserve(idx.size());
+    std::vector<std::vector<int>> buckets;
+    std::vector<int>              leftBuf, rightBuf;
+    leftBuf.reserve(idx.size());
+    rightBuf.reserve(idx.size());
+
+    const size_t N   = idx.size();
+    const double EPS = 1e-12;
+
+    for (int f = 0; f < rowLen; ++f) {
+
+        /* 1. 收集特征值 */
+        values.clear();
+        for (int i : idx) values.emplace_back(data[i * rowLen + f]);
+
+        /* 2. 计算自适应箱数 */
+        const int B = calculateOptimalBins(values);
+        if (B < 2) continue;
+
+        /* 3. 计算 min / max */
+        const auto [vMinIt, vMaxIt] = std::minmax_element(values.begin(), values.end());
+        const double vMin = *vMinIt;
+        const double vMax = *vMaxIt;
+        if (vMax - vMin < EPS) continue;
+
+        const double binW = (vMax - vMin) / B;
+
+        /* 4. 分桶 */
+        buckets.assign(B, {});
         for (int i : idx) {
-            int b = std::min<int>((X[i*D+f] - vmin) / binWidth, B-1);
+            int b = static_cast<int>((data[i * rowLen + f] - vMin) / binW);
+            if (b == B) b--;
             buckets[b].push_back(i);
         }
-        
-        // 寻找最佳分割点
-        std::vector<int> leftIdx;
-        leftIdx.reserve(idx.size());
-        
-        for (int b = 0; b < B-1; ++b) {
-            leftIdx.insert(leftIdx.end(), buckets[b].begin(), buckets[b].end());
-            if (leftIdx.empty()) continue;
-            
-            size_t leftSize = leftIdx.size();
-            size_t rightSize = idx.size() - leftSize;
-            if (rightSize == 0) break;
-            
-            // 构造右侧索引
-            std::vector<int> rightIdx;
-            rightIdx.reserve(rightSize);
-            for (int k = b+1; k < B; ++k) {
-                rightIdx.insert(rightIdx.end(), buckets[k].begin(), buckets[k].end());
-            }
-            
-            double mL = crit.nodeMetric(y, leftIdx);
-            double mR = crit.nodeMetric(y, rightIdx);
-            double gain = parentMetric - (mL*leftSize + mR*rightSize) / idx.size();
-            
+
+        /* 5. 线性扫描分割点 */
+        leftBuf.clear();
+        for (int b = 0; b < B - 1; ++b) {
+            leftBuf.insert(leftBuf.end(), buckets[b].begin(), buckets[b].end());
+            if (leftBuf.empty()) continue;
+
+            const size_t leftN  = leftBuf.size();
+            const size_t rightN = N - leftN;
+            if (rightN == 0) break;
+
+            rightBuf.clear();
+            for (int k = b + 1; k < B; ++k)
+                rightBuf.insert(rightBuf.end(), buckets[k].begin(), buckets[k].end());
+
+            double mL = criterion.nodeMetric(labels, leftBuf);
+            double mR = criterion.nodeMetric(labels, rightBuf);
+            double gain = parentMetric -
+                (mL * leftN + mR * rightN) / static_cast<double>(N);
+
             if (gain > bestGain) {
                 bestGain = gain;
                 bestFeat = f;
-                bestThr = vmin + binWidth * (b + 1);
+                bestThr  = vMin + binW * (b + 1);
             }
         }
     }

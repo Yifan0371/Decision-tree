@@ -1,54 +1,74 @@
 #include "finder/RandomSplitFinder.hpp"
-#include <unordered_set>
 #include <limits>
+#include <random>
+#include <vector>
+#include <cmath>
 
-std::tuple<int,double,double> RandomSplitFinder::findBestSplit(
-    const std::vector<double>& X, int D,
-    const std::vector<double>& y,
-    const std::vector<int>& idx,
-    double parentMetric,
-    const ISplitCriterion& crit) const
+/* ------------------------------------------------------------------ */
+/* 新版实现：                                                          */
+/* - 单线程、无依赖编译器矢量化                                        */
+/* - 复用 L/R 缓冲，去掉 unordered_set                                 */
+/* ------------------------------------------------------------------ */
+std::tuple<int, double, double>
+RandomSplitFinder::findBestSplit(const std::vector<double>& X,   // 特征矩阵 (按行)
+                                 int                          D, // 每行特征数
+                                 const std::vector<double>&  y,  // 标签
+                                 const std::vector<int>&     idx,// 当前样本索引
+                                 double                      parentMetric,
+                                 const ISplitCriterion&      crit) const
 {
-    int bestFeat = -1; 
-    double bestThr = 0, bestGain = -std::numeric_limits<double>::infinity();
-    std::uniform_real_distribution<> uni01(0.0, 1.0);
+    if (idx.size() < 2) return {-1, 0.0, 0.0};
 
-    // 对每个特征尝试k个随机阈值
+    int    bestFeat  = -1;
+    double bestThr   = 0.0;
+    double bestGain  = -std::numeric_limits<double>::infinity();
+
+    std::uniform_real_distribution<double> uni01(0.0, 1.0);
+
+    /* ---------- 预分配左右缓冲区，反复复用 ---------- */
+    std::vector<int> leftBuf, rightBuf;
+    leftBuf.reserve(idx.size());
+    rightBuf.reserve(idx.size());
+
+    /* ---------- 穷举每个特征 ---------- */
     for (int f = 0; f < D; ++f) {
-        // 找到该特征的值域
-        double vmin = std::numeric_limits<double>::infinity();
-        double vmax = -vmin;
+
+        /* --- 计算该特征的最小/最大值 --- */
+        double vMin =  std::numeric_limits<double>::infinity();
+        double vMax = -vMin;
         for (int i : idx) {
-            double v = X[i*D+f];
-            vmin = std::min(vmin, v); 
-            vmax = std::max(vmax, v);
+            double v = X[i * D + f];
+            vMin = std::min(vMin, v);
+            vMax = std::max(vMax, v);
         }
-        if (vmax == vmin) continue; // 特征值都相同
-        
-        // 采样k个随机阈值
-        std::unordered_set<double> tried;
+        if (std::fabs(vMax - vMin) < 1e-12) continue;  // 全部相等，跳过
+
+        /* --- 对该特征尝试 k_ 个随机阈值 --- */
         for (int r = 0; r < k_; ++r) {
-            double thr = vmin + uni01(gen_) * (vmax - vmin);
-            if (!tried.insert(thr).second) continue; // 避免重复
+            double thr = vMin + uni01(gen_) * (vMax - vMin);
 
-            std::vector<int> L, R;
-            L.reserve(idx.size()/2); 
-            R.reserve(idx.size()/2);
+            leftBuf.clear();
+            rightBuf.clear();
             for (int i : idx) {
-                if (X[i*D+f] <= thr) L.push_back(i);
-                else R.push_back(i);
+                if (X[i * D + f] <= thr)
+                    leftBuf.emplace_back(i);
+                else
+                    rightBuf.emplace_back(i);
             }
-            if (L.empty() || R.empty()) continue;
+            if (leftBuf.empty() || rightBuf.empty()) continue;
 
-            double mL = crit.nodeMetric(y, L);
-            double mR = crit.nodeMetric(y, R);
-            double gain = parentMetric - (mL*L.size() + mR*R.size()) / idx.size();
+            double mL = crit.nodeMetric(y, leftBuf);
+            double mR = crit.nodeMetric(y, rightBuf);
+            double gain = parentMetric -
+                          (mL * leftBuf.size() + mR * rightBuf.size()) / idx.size();
+
             if (gain > bestGain) {
-                bestGain = gain; 
-                bestFeat = f; 
-                bestThr = thr;
+                bestGain = gain;
+                bestFeat = f;
+                bestThr  = thr;
             }
         }
     }
+
     return {bestFeat, bestThr, bestGain};
 }
