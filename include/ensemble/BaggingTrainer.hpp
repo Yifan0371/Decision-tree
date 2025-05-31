@@ -100,7 +100,7 @@ private:
                                          const std::vector<double>& y_val) const;
     
     /**
-     * Bootstrap采样
+     * Bootstrap采样（优化版本）
      * @param dataSize 原始数据大小
      * @param sampleIndices 输出：采样索引
      * @param oobIndices 输出：袋外索引
@@ -110,14 +110,14 @@ private:
                         std::vector<int>& oobIndices) const;
     
     /**
-     * 根据索引提取子数据集
+     * 根据索引提取子数据集（优化版本，减少内存复制）
      */
-    void extractSubset(const std::vector<double>& originalData,
-                      int rowLength,
-                      const std::vector<double>& originalLabels,
-                      const std::vector<int>& indices,
-                      std::vector<double>& subData,
-                      std::vector<double>& subLabels) const;
+    void extractSubsetOptimized(const std::vector<double>& originalData,
+                               int rowLength,
+                               const std::vector<double>& originalLabels,
+                               const std::vector<int>& indices,
+                               std::vector<double>& subData,
+                               std::vector<double>& subLabels) const;
 };
 
 #endif // ENSEMBLE_BAGGING_TRAINER_HPP

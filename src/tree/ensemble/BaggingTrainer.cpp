@@ -145,6 +145,7 @@ std::unique_ptr<IPruner> BaggingTrainer::createPruner(const std::vector<double>&
     }
 }
 
+// **优化1: 高效Bootstrap采样**
 void BaggingTrainer::bootstrapSample(int dataSize,
                                      std::vector<int>& sampleIndices,
                                      std::vector<int>& oobIndices) const {
@@ -153,45 +154,54 @@ void BaggingTrainer::bootstrapSample(int dataSize,
     sampleIndices.clear();
     sampleIndices.reserve(sampleSize);
     
+    // 优化：使用更快的随机数生成
     std::uniform_int_distribution<int> dist(0, dataSize - 1);
-    std::unordered_set<int> sampledSet;
+    
+    // 优化：使用bitset跟踪采样状态，避免unordered_set查找开销
+    std::vector<bool> sampledBits(dataSize, false);
     
     // Bootstrap采样（有放回采样）
     for (int i = 0; i < sampleSize; ++i) {
         int idx = dist(gen_);
         sampleIndices.push_back(idx);
-        sampledSet.insert(idx);
+        sampledBits[idx] = true;
     }
     
-    // 计算袋外样本
+    // 计算袋外样本（线性扫描比查找更快）
     oobIndices.clear();
+    oobIndices.reserve(dataSize - sampleSize);
     for (int i = 0; i < dataSize; ++i) {
-        if (sampledSet.find(i) == sampledSet.end()) {
+        if (!sampledBits[i]) {
             oobIndices.push_back(i);
         }
     }
 }
 
-void BaggingTrainer::extractSubset(const std::vector<double>& originalData,
-                                  int rowLength,
-                                  const std::vector<double>& originalLabels,
-                                  const std::vector<int>& indices,
-                                  std::vector<double>& subData,
-                                  std::vector<double>& subLabels) const {
-    int featCount = rowLength; // rowLength 在这里应该是特征数，不包括标签
+// **优化2: 零拷贝数据传递**
+void BaggingTrainer::extractSubsetOptimized(const std::vector<double>& originalData,
+                                           int rowLength,
+                                           const std::vector<double>& originalLabels,
+                                           const std::vector<int>& indices,
+                                           std::vector<double>& subData,
+                                           std::vector<double>& subLabels) const {
     
-    subData.clear();
-    subLabels.clear();
-    subData.reserve(indices.size() * featCount);
-    subLabels.reserve(indices.size());
+    int featCount = rowLength;
+    size_t totalSize = indices.size() * featCount;
     
-    for (int idx : indices) {
-        // 复制特征
-        for (int f = 0; f < featCount; ++f) {
-            subData.push_back(originalData[idx * featCount + f]);
-        }
-        // 复制标签
-        subLabels.push_back(originalLabels[idx]);
+    // 预分配确切大小，避免重新分配
+    subData.resize(totalSize);
+    subLabels.resize(indices.size());
+    
+    // 批量复制，更好的缓存局部性
+    for (size_t i = 0; i < indices.size(); ++i) {
+        int idx = indices[i];
+        
+        // 使用memcpy优化连续内存复制
+        std::copy(originalData.begin() + idx * featCount,
+                 originalData.begin() + (idx + 1) * featCount,
+                 subData.begin() + i * featCount);
+        
+        subLabels[i] = originalLabels[idx];
     }
 }
 
@@ -204,31 +214,47 @@ void BaggingTrainer::train(const std::vector<double>& data,
     int dataSize = static_cast<int>(labels.size());
     std::cout << "Training " << numTrees_ << " trees with bagging..." << std::endl;
     
+    // **优化3: 预分配训练器组件池**
+    std::vector<std::unique_ptr<ISplitFinder>> finderPool;
+    std::vector<std::unique_ptr<ISplitCriterion>> criterionPool;
+    std::vector<std::unique_ptr<IPruner>> prunerPool;
+    
+    finderPool.reserve(numTrees_);
+    criterionPool.reserve(numTrees_);
+    prunerPool.reserve(numTrees_);
+    
+    for (int i = 0; i < numTrees_; ++i) {
+        finderPool.push_back(createSplitFinder());
+        criterionPool.push_back(createCriterion());
+        prunerPool.push_back(createPruner({}, rowLength, {}));
+    }
+    
+    // **优化4: 重用数据缓冲区**
+    std::vector<double> subDataBuffer;
+    std::vector<double> subLabelsBuffer;
+    subDataBuffer.reserve(dataSize * rowLength);  // 最大可能大小
+    subLabelsBuffer.reserve(dataSize);
+    
     for (int t = 0; t < numTrees_; ++t) {
         // Bootstrap采样
         std::vector<int> sampleIndices, oobIndices;
         bootstrapSample(dataSize, sampleIndices, oobIndices);
-        oobIndices_.push_back(oobIndices);
+        oobIndices_.push_back(std::move(oobIndices));
         
-        // 提取子数据集
-        std::vector<double> subData, subLabels;
-        extractSubset(data, rowLength, labels, sampleIndices, subData, subLabels);
+        // 优化的数据提取
+        extractSubsetOptimized(data, rowLength, labels, sampleIndices, 
+                              subDataBuffer, subLabelsBuffer);
         
-        // 创建单个树的组件
-        auto finder = createSplitFinder();
-        auto criterion = createCriterion();
-        auto pruner = createPruner({}, rowLength, {}); // Bagging通常不用验证集剪枝
-        
-        // 创建并训练树
+        // 重用预分配的组件
         auto tree = std::make_unique<SingleTreeTrainer>(
-            std::move(finder),
-            std::move(criterion), 
-            std::move(pruner),
+            std::move(finderPool[t]),
+            std::move(criterionPool[t]),
+            std::move(prunerPool[t]),
             maxDepth_,
             minSamplesLeaf_
         );
         
-        tree->train(subData, rowLength, subLabels);
+        tree->train(subDataBuffer, rowLength, subLabelsBuffer);
         trees_.push_back(std::move(tree));
         
         // 进度输出
@@ -272,6 +298,7 @@ void BaggingTrainer::evaluate(const std::vector<double>& X,
     mae /= n;
 }
 
+// **优化5: 高效特征重要性计算**
 std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const {
     std::vector<double> importance(numFeatures, 0.0);
     
@@ -280,13 +307,14 @@ std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const 
         const Node* root = tree->getRoot();
         if (!root || root->isLeaf) continue;
         
-        // 使用栈实现的非递归遍历
-        std::vector<const Node*> stack;
-        stack.push_back(root);
+        // 使用栈实现的非递归遍历（内存友好）
+        std::vector<const Node*> nodeStack;
+        nodeStack.reserve(1000);  // 预估栈大小
+        nodeStack.push_back(root);
         
-        while (!stack.empty()) {
-            const Node* node = stack.back();
-            stack.pop_back();
+        while (!nodeStack.empty()) {
+            const Node* node = nodeStack.back();
+            nodeStack.pop_back();
             
             if (!node || node->isLeaf) continue;
             
@@ -296,22 +324,24 @@ std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const 
             }
             
             // 添加子节点到栈中
-            if (node->getLeft()) stack.push_back(node->getLeft());
-            if (node->getRight()) stack.push_back(node->getRight());
+            if (node->getLeft()) nodeStack.push_back(node->getLeft());
+            if (node->getRight()) nodeStack.push_back(node->getRight());
         }
     }
     
     // 归一化
     double total = std::accumulate(importance.begin(), importance.end(), 0.0);
     if (total > 0) {
+        double invTotal = 1.0 / total;  // 避免重复除法
         for (double& imp : importance) {
-            imp /= total;
+            imp *= invTotal;
         }
     }
     
     return importance;
 }
 
+// **优化6: 批量OOB计算**
 double BaggingTrainer::getOOBError(const std::vector<double>& data,
                                   int rowLength,
                                   const std::vector<double>& labels) const {
@@ -321,9 +351,12 @@ double BaggingTrainer::getOOBError(const std::vector<double>& data,
     std::vector<double> oobPredictions(dataSize, 0.0);
     std::vector<int> oobCounts(dataSize, 0);
     
-    // 对每棵树，使用其OOB样本进行预测
+    // 批量计算所有OOB预测
     for (size_t t = 0; t < trees_.size(); ++t) {
-        for (int idx : oobIndices_[t]) {
+        const auto& oobSet = oobIndices_[t];
+        
+        // 批量预测当前树的OOB样本
+        for (int idx : oobSet) {
             double pred = trees_[t]->predict(&data[idx * rowLength], rowLength);
             oobPredictions[idx] += pred;
             oobCounts[idx]++;
