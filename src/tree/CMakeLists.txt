@@ -1,4 +1,4 @@
-# 决策树核心模块，包含 criterion、finder、pruner、trainer
+# 决策树核心模块，包含 criterion、finder、pruner、trainer、ensemble
 add_library(DecisionTree_lib
     criterion/MSECriterion.cpp
     criterion/MAECriterion.cpp
@@ -18,9 +18,9 @@ add_library(DecisionTree_lib
     pruner/CostComplexityPruner.cpp
     pruner/ReducedErrorPruner.cpp
     trainer/SingleTreeTrainer.cpp
+    ensemble/BaggingTrainer.cpp
 )
 
 target_include_directories(DecisionTree_lib PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
-

@@ -34,3 +34,24 @@ build/bin/DataCleanApp
 ```
 
 清洗结果会输出到 `data/data_clean/cleaned_<原文件名>.csv`。
+
+# 单棵决策树测试脚本
+# 1. 先编译项目（在项目根目录）
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+cd ..
+
+# 2. 复制可执行文件到根目录
+cp build/DecisionTreeMain .
+
+# 3. 进入脚本目录
+cd script/single_tree
+
+# 4. 给脚本添加执行权限
+chmod +x *.sh
+
+# 5. 运行脚本
+./test_criterion.sh
+./test_finder.sh
+./test_pruner.sh

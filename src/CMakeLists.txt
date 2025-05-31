@@ -10,7 +10,7 @@ add_subdirectory(pipeline)
 add_subdirectory(tree)
 add_subdirectory(app)
 
-# 最终可执行文件
+# 原有的单树可执行文件
 add_executable(DecisionTreeMain
     main.cpp
 )
@@ -21,4 +21,5 @@ target_link_libraries(DecisionTreeMain PRIVATE
     DataSplit_lib
     DecisionTree_lib
     SingleTreeApp_lib
+    BaggingApp_lib
 )

@@ -58,7 +58,7 @@ private:
     std::unique_ptr<ISplitFinder>    finder_;
     std::unique_ptr<ISplitCriterion> criterion_;
     std::unique_ptr<IPruner>         pruner_;
-    std::unique_ptr<Node>            root_;
+    // 移除重复的 root_ 定义，使用基类的 root_
 };
 
 #endif // TREE_SINGLE_TRAINER_HPP
