@@ -1,0 +1,87 @@
+==================================================
+           Boosting Methods Comparison           
+         XGBoost vs GBRT Performance (Fixed)     
+==================================================
+开始时间: 2025年 06月 01日 星期日 12:11:46 CEST
+数据文件: data/data_clean/cleaned_data.csv
+XGBoost可执行文件: build/XGBoostMain
+GBRT可执行文件: build/RegressionBoostingMain
+结果保存到: script/boosting/boosting_comparison_results_fixed.txt
+修复说明: 使用精确的MSE提取方法
+
+开始运行对比测试 (使用修复的MSE提取)...
+
+=== 1. 基准配置对比 ===
+测试配置: 基准配置
+参数: rounds=30, eta=0.1, depth=4, min_samples=1, subsample=1.0
+  运行XGBoost...
+  运行GBRT...
+
+算法          | TestMSE  | TrainTime | WallTime | Trees
+-------------------------------------------------------
+XGBoost         | 0.000233 | 1414ms   | 1541ms   | 30   
+GBRT            | 0.000234 | 1362ms   | 1422ms   | 30   
+
+性能对比分析:
+  - XGBoost测试MSE更低: 0.000233 vs 0.000234 (相对差异: 0.000001)
+  - MSE比值: XGBoost/GBRT = 1.00
+  - GBRT训练更快: 1362ms vs 1414ms (0.96x)
+  - GBRT总时间更短: 1422ms vs 1541ms (1.08x 加速)
+  - MSE数量级: XGBoost(低), GBRT(低)
+
+========================================
+
+=== 2. 高学习率对比 ===
+测试配置: 高学习率
+参数: rounds=30, eta=0.3, depth=4, min_samples=1, subsample=1.0
+  运行XGBoost...
+  运行GBRT...
+
+算法          | TestMSE  | TrainTime | WallTime | Trees
+-------------------------------------------------------
+XGBoost         | 0.000175 | 1443ms   | 1504ms   | 30   
+GBRT            | 0.000174 | 1693ms   | 1771ms   | 30   
+
+性能对比分析:
+  - GBRT测试MSE更低: 0.000174 vs 0.000175 (相对差异: 0.000001)
+  - MSE比值: XGBoost/GBRT = 1.01
+  - XGBoost训练更快: 1443ms vs 1693ms (0.85x)
+  - XGBoost总时间更短: 1504ms vs 1771ms (1.18x 加速)
+  - MSE数量级: XGBoost(低), GBRT(低)
+
+========================================
+
+=== 3. 深树对比 ===
+测试配置: 深树配置
+参数: rounds=30, eta=0.1, depth=8, min_samples=1, subsample=1.0
+  运行XGBoost...
+  运行GBRT...
+
+算法          | TestMSE  | TrainTime | WallTime | Trees
+-------------------------------------------------------
+XGBoost         | 0.000151 | 2863ms   | 3016ms   | 30   
+GBRT            | 0.000146 | 2552ms   | 2630ms   | 30   
+
+性能对比分析:
+  - GBRT测试MSE更低: 0.000146 vs 0.000151 (相对差异: 0.000005)
+  - MSE比值: XGBoost/GBRT = 1.03
+  - GBRT训练更快: 2552ms vs 2863ms (0.89x)
+  - GBRT总时间更短: 2630ms vs 3016ms (1.15x 加速)
+  - MSE数量级: XGBoost(低), GBRT(低)
+
+========================================
+
+==================================================
+                 测试总结                         
+==================================================
+结束时间: 2025年 06月 01日 星期日 12:11:59 CEST
+测试配置总数: 3 (快速验证)
+数据集: data/data_clean/cleaned_data.csv
+结果已保存到: script/boosting/boosting_comparison_results_fixed.txt
+
+修复验证:
+- 使用精确的sed匹配避免提取配置参数中的数字
+- XGBoost和GBRT的MSE应该在相同数量级
+- 预期MSE范围: 0.0002-0.0005
+
+==================================================
