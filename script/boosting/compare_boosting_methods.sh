@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # =============================================================================
-# script/boosting/compare_boosting_methods_fixed.sh
+# script/boosting/compare_boosting_methods.sh
 # XGBoost vs GBRT 性能对比脚本 (修复MSE提取问题)
-# 在项目根目录运行: bash script/boosting/compare_boosting_methods_fixed.sh
+# 在项目根目录运行: bash script/boosting/compare_boosting_methods.sh
 # =============================================================================
 
 DATA_PATH="data/data_clean/cleaned_data.csv"

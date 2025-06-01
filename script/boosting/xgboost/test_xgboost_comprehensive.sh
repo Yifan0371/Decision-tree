@@ -6,7 +6,7 @@
 # 在项目根目录运行: bash script/boosting/xgboost/test_xgboost_comprehensive.sh
 # =============================================================================
 
-DATA_PATH="data/data_clean/cleaned_data.csv"
+DATA_PATH="data/data_base/cleaned_data.csv"
 EXECUTABLE="build/XGBoostMain"
 
 # 结果文件路径
