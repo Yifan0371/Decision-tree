@@ -53,25 +53,20 @@ private:
     mutable std::vector<int> sampleIndices_;
     mutable std::vector<double> sampleWeights_;
     
-    // 初始化组件
+    // 私有方法
     void initializeComponents();
-    
-    // 预处理特征绑定
     void preprocessFeatures(const std::vector<double>& data, 
                           int rowLength, 
                           size_t sampleSize);
-    
-    // 计算基准分数
     double computeBaseScore(const std::vector<double>& y) const;
-    
-    // 计算特征重要性
     std::vector<double> calculateFeatureImportance(int numFeatures) const;
-    
-    // 创建直方图分割器（复用现有实现）
     std::unique_ptr<ISplitFinder> createHistogramFinder() const;
-    
-    // 创建准则（复用现有实现）
     std::unique_ptr<ISplitCriterion> createCriterion() const;
+    
+    // **修复: 添加predictSingleTree声明**
+    double predictSingleTree(const Node* tree, 
+                           const double* sample, 
+                           int rowLength) const;
 };
 
 #endif // LIGHTGBM_TRAINER_LIGHTGBMTRAINER_HPP
