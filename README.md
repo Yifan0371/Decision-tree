@@ -55,3 +55,6 @@ chmod +x *.sh
 ./test_criterion.sh
 ./test_finder.sh
 ./test_pruner.sh
+
+# 重新运行测试
+bash script/boosting/gbrt/test_gbrt_comprehensive.sh

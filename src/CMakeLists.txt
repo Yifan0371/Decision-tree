@@ -34,3 +34,18 @@ target_link_libraries(RegressionBoostingMain PRIVATE
     DecisionTree_lib
     RegressionBoosting_lib
 )
+# 添加XGBoost模块
+add_subdirectory(xgboost)
+
+# 添加XGBoost可执行文件
+add_executable(XGBoostMain
+    xgboost_main.cpp
+)
+
+target_link_libraries(XGBoostMain PRIVATE
+    DataIO_lib
+    DataSplit_lib
+    DecisionTree_lib
+    RegressionBoosting_lib
+    XGBoost_lib
+)
