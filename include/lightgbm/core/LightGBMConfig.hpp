@@ -36,6 +36,15 @@ struct LightGBMConfig {
     
     // 目标函数
     std::string objective = "regression"; // regression, binary, multiclass
+
+    // **新增：分割器配置**
+    std::string splitMethod = "histogram_ew";  // 分割方法选择
+    int histogramBins = 255;           // 直方图分箱数
+    std::string adaptiveRule = "sturges"; // 自适应规则
+    int minSamplesPerBin = 5;          // 等频分箱最小样本数
+    int maxAdaptiveBins = 128;         // 自适应最大分箱数
+    double variabilityThreshold = 0.1; // 变异性阈值
+    bool enableSIMD = true;            // SIMD优化
 };
 
 #endif // LIGHTGBM_CORE_LIGHTGBMCONFIG_HPP

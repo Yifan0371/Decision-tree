@@ -37,6 +37,14 @@ struct LightGBMAppOptions {
     // 正则化
     double lambda = 0.0;
     double minSplitGain = 0.0;
+    // **新增分割器配置**
+    std::string splitMethod = "histogram_ew";
+    int histogramBins = 255;
+    std::string adaptiveRule = "sturges";
+    int minSamplesPerBin = 5;
+    int maxAdaptiveBins = 128;
+    double variabilityThreshold = 0.1;
+    bool enableSIMD = true;
 };
 
 /** 运行LightGBM训练和评估 */

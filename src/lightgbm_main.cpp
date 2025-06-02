@@ -64,6 +64,15 @@ bool parseArguments(int argc, char** argv, LightGBMAppOptions& opts) {
         else if (arg == "--disable-bundling") opts.enableFeatureBundling = false;
         else if (arg == "--verbose") opts.verbose = true;
         else if (arg == "--quiet") opts.verbose = false;
+        
+        else if (arg == "--split-method" && i + 1 < argc) opts.splitMethod = argv[++i];
+        else if (arg == "--histogram-bins" && i + 1 < argc) opts.histogramBins = std::stoi(argv[++i]);
+        else if (arg == "--adaptive-rule" && i + 1 < argc) opts.adaptiveRule = argv[++i];
+        else if (arg == "--min-samples-per-bin" && i + 1 < argc) opts.minSamplesPerBin = std::stoi(argv[++i]);
+        else if (arg == "--max-adaptive-bins" && i + 1 < argc) opts.maxAdaptiveBins = std::stoi(argv[++i]);
+        else if (arg == "--variability-threshold" && i + 1 < argc) opts.variabilityThreshold = std::stod(argv[++i]);
+        else if (arg == "--enable-simd") opts.enableSIMD = true;
+        else if (arg == "--disable-simd") opts.enableSIMD = false;
         else {
             std::cerr << "Unknown argument: " << arg << std::endl;
             return false;

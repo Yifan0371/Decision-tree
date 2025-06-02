@@ -75,6 +75,15 @@ std::unique_ptr<LightGBMTrainer> createLightGBMTrainer(const LightGBMAppOptions&
     config.tolerance = opts.tolerance;
     config.lambda = opts.lambda;
     config.minSplitGain = opts.minSplitGain;
+
+    // **新增配置传递**
+    config.splitMethod = opts.splitMethod;
+    config.histogramBins = opts.histogramBins;
+    config.adaptiveRule = opts.adaptiveRule;
+    config.minSamplesPerBin = opts.minSamplesPerBin;
+    config.maxAdaptiveBins = opts.maxAdaptiveBins;
+    config.variabilityThreshold = opts.variabilityThreshold;
+    config.enableSIMD = opts.enableSIMD;
     
     return std::make_unique<LightGBMTrainer>(config);
 }
@@ -101,7 +110,14 @@ void printLightGBMModelSummary(const LightGBMTrainer* trainer, const LightGBMApp
     std::cout << "Num Leaves: " << opts.numLeaves << std::endl;
     std::cout << "GOSS: " << (opts.enableGOSS ? "Enabled" : "Disabled") << std::endl;
     std::cout << "Feature Bundling: " << (opts.enableFeatureBundling ? "Enabled" : "Disabled") << std::endl;
-    
+
+    std::cout << "Split Method: " << opts.splitMethod << std::endl;
+    if (opts.splitMethod.find("histogram") != std::string::npos) {
+        std::cout << "Histogram Bins: " << opts.histogramBins << std::endl;
+    }
+    if (opts.splitMethod.find("adaptive") != std::string::npos) {
+        std::cout << "Adaptive Rule: " << opts.adaptiveRule << std::endl;
+    }
     const auto& losses = trainer->getTrainingLoss();
     if (!losses.empty()) {
         std::cout << "Final Training Loss: " << std::fixed << std::setprecision(6) 

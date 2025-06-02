@@ -6,7 +6,7 @@
 # 在项目根目录运行: bash script/boosting/xgboost/test_xgboost_comprehensive.sh
 # =============================================================================
 
-DATA_PATH="data/data_base/cleaned_data.csv"
+DATA_PATH="/data/data_base/cleaned_data.csv"
 EXECUTABLE="build/XGBoostMain"
 
 # 结果文件路径
@@ -55,7 +55,7 @@ if [ ! -f "$DATA_PATH" ]; then
     output "错误: 找不到数据文件 $DATA_PATH"
     output "请检查数据文件是否存在，或使用其他数据文件"
     # 尝试其他可能的数据文件
-    for alt_data in "data/data_clean/cleaned_sample_100_rows.csv" "data/data_clean/cleaned_sample_400_rows.csv" "data/data_clean/cleaned_15k_random.csv"; do
+    for alt_data in "data/data_clean/cleaned_data.csv" "data/data_clean/cleaned_sample_400_rows.csv" "data/data_clean/cleaned_15k_random.csv"; do
         if [ -f "$alt_data" ]; then
             output "使用替代数据文件: $alt_data"
             DATA_PATH="$alt_data"
