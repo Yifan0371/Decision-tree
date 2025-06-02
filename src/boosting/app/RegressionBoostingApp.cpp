@@ -83,7 +83,18 @@ std::unique_ptr<GBRTTrainer> createRegressionBoostingTrainer(const RegressionBoo
     config.learningRate = opts.learningRate;
     config.maxDepth = opts.maxDepth;
     config.minSamplesLeaf = opts.minSamplesLeaf;
+    config.criterion = opts.criterion;
+    config.splitMethod = opts.splitMethod;
     config.verbose = opts.verbose;
+    config.subsample = opts.subsample;
+    
+    // === 传递DART配置 ===
+    config.enableDart = opts.enableDart;
+    config.dartDropRate = opts.dartDropRate;
+    config.dartNormalize = opts.dartNormalize;
+    config.dartSkipDropForPrediction = opts.dartSkipDropForPrediction;
+    config.dartStrategy = opts.dartStrategy;
+    config.dartSeed = opts.dartSeed;
     
     return std::make_unique<GBRTTrainer>(config, std::move(strategy));
 }
@@ -97,6 +108,25 @@ RegressionBoostingOptions parseRegressionCommandLine(int argc, char** argv) {
     if (argc >= 4) opts.numIterations = std::stoi(argv[3]);
     if (argc >= 5) opts.learningRate = std::stod(argv[4]);
     if (argc >= 6) opts.maxDepth = std::stoi(argv[5]);
+    if (argc >= 7) opts.minSamplesLeaf = std::stoi(argv[6]);
+    if (argc >= 8) opts.criterion = argv[7];
+    if (argc >= 9) opts.splitMethod = argv[8];
+    if (argc >= 10) opts.subsample = std::stod(argv[9]);
+    
+    // === 新增DART参数支持 ===
+    if (argc >= 11) {
+        std::string enableDartStr = argv[10];
+        opts.enableDart = (enableDartStr == "true" || enableDartStr == "1");
+    }
+    if (argc >= 12) opts.dartDropRate = std::stod(argv[11]);
+    if (argc >= 13) {
+        std::string normalizeStr = argv[12];
+        opts.dartNormalize = (normalizeStr == "true" || normalizeStr == "1");
+    }
+    if (argc >= 14) {
+        std::string skipDropStr = argv[13];
+        opts.dartSkipDropForPrediction = (skipDropStr == "true" || skipDropStr == "1");
+    }
     
     return opts;
 }

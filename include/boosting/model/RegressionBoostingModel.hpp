@@ -94,7 +94,9 @@ public:
             memoryUsage += estimateTreeMemory(regTree.tree.get());
         }
     }
-    
+    /** 获取树列表的引用（用于DART权重更新） */
+    const std::vector<RegressionTree>& getTrees() const { return trees_; }
+    std::vector<RegressionTree>& getTrees() { return trees_; }
     /** 获取特征重要性（基于分割次数和样本权重） */
     std::vector<double> getFeatureImportance(int numFeatures) const {
         std::vector<double> importance(numFeatures, 0.0);
@@ -123,8 +125,8 @@ private:
     std::vector<RegressionTree> trees_;
     double baseScore_;
     
-    /** 单棵回归树预测 */
-    inline double predictSingleTree(const Node* tree, const double* sample, int rowLength) const {
+   /** 单棵回归树预测 */
+    inline double predictSingleTree(const Node* tree, const double* sample, int /* rowLength */) const {
         const Node* cur = tree;
         while (cur && !cur->isLeaf) {
             double value = sample[cur->getFeatureIndex()];

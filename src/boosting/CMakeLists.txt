@@ -13,6 +13,8 @@ add_library(RegressionBoosting_lib
     
     # 训练器
     trainer/GBRTTrainer.cpp
+    # DART策略 (新增)
+    dart/UniformDartStrategy.cpp
     
     # 应用
     app/RegressionBoostingApp.cpp

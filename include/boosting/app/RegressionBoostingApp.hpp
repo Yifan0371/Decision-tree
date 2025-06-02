@@ -37,7 +37,14 @@ struct RegressionBoostingOptions {
     
     // 性能参数
     bool useLineSearch = false;        
-    double subsample = 1.0;            
+    double subsample = 1.0;    
+     // === 新增DART参数 ===
+    bool enableDart = false;
+    double dartDropRate = 0.1;
+    bool dartNormalize = true;
+    bool dartSkipDropForPrediction = false;
+    std::string dartStrategy = "uniform";
+    uint32_t dartSeed = 42;        
 };
 
 /** 运行回归Boosting训练和评估 */

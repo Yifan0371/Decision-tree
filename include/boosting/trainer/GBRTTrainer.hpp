@@ -1,5 +1,5 @@
 // =============================================================================
-// include/boosting/trainer/GBRTTrainer.hpp
+// include/boosting/trainer/GBRTTrainer.hpp (需要修改的部分)
 // =============================================================================
 #ifndef BOOSTING_TRAINER_GBRTTRAINER_HPP
 #define BOOSTING_TRAINER_GBRTTRAINER_HPP
@@ -7,9 +7,11 @@
 #include "../model/RegressionBoostingModel.hpp"
 #include "../strategy/GradientRegressionStrategy.hpp"
 #include "tree/trainer/SingleTreeTrainer.hpp"
+#include "../dart/IDartStrategy.hpp"  // 新增：DART策略接口
 #include <memory>
 #include <iostream>
 #include <vector>
+#include <random>  // 新增：随机数生成器
 
 /** 梯度提升回归树配置 */
 struct GBRTConfig {
@@ -35,6 +37,17 @@ struct GBRTConfig {
     
     // 性能优化
     bool useLineSearch = false;        // 是否使用线搜索优化学习率
+    
+    // === 新增DART参数 ===
+    bool enableDart = false;                    // 是否启用DART
+    double dartDropRate = 0.1;                 // 树丢弃率 [0.0, 1.0)
+    bool dartNormalize = true;                 // 是否DART权重归一化
+    bool dartSkipDropForPrediction = false;    // 预测时是否跳过dropout
+    std::string dartStrategy = "uniform";      // DART策略：目前只支持uniform
+    uint32_t dartSeed = 42;                   // DART随机种子
+    std::string dartWeightStrategy = "mild";
+
+    
 };
 
 /** 梯度提升回归树训练器 */
@@ -92,6 +105,10 @@ private:
     int valRowLength_;
     bool hasValidation_ = false;
     
+    // === 新增DART相关成员 ===
+    std::unique_ptr<IDartStrategy> dartStrategy_;
+    mutable std::mt19937 dartGen_;
+    
     /** 创建单树训练器（复用你现有的SingleTreeTrainer） */
     std::unique_ptr<SingleTreeTrainer> createTreeTrainer() const;
     
@@ -112,6 +129,27 @@ private:
     
     /** 计算验证集损失 */
     double computeValidationLoss(const std::vector<double>& predictions) const;
+    
+    // === 新增DART相关方法 ===
+    /** 创建DART策略 */
+    std::unique_ptr<IDartStrategy> createDartStrategy() const;
+    
+    /** 标准GBRT训练 */
+    void trainStandard(const std::vector<double>& X,
+                      int rowLength,
+                      const std::vector<double>& y);
+    
+    /** 使用DART的训练 */
+    void trainWithDart(const std::vector<double>& X,
+                      int rowLength,
+                      const std::vector<double>& y);
+    
+    /** 计算带dropout的当前预测 */
+    void updatePredictionsWithDropout(
+        const std::vector<double>& X,
+        int rowLength,
+        const std::vector<int>& droppedTrees,
+        std::vector<double>& predictions) const;
 };
 
 #endif // BOOSTING_TRAINER_GBRTTRAINER_HPP

@@ -1,0 +1,81 @@
+=============================================================================
+GBRT DART 全面参数测试结果
+测试时间: 2025年 06月 02日 星期一 20:02:10 CEST
+数据文件: data/data_clean/cleaned_data.csv
+=============================================================================
+
+测试描述                   | TestMSE  | TrainTime | WallTime | 参数配置
+------------------------------------------------------------------------------------------------------------------------
+=== 1. DART vs 标准GBRT对比测试 ===
+标准GBRT (基准)            | 0.000234 | 1520ms   | 1680ms   | DART=false drop=0.10 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART 0%丢弃率               | 0.000234 | 1633ms   | 1698ms   | DART=true drop=0.00 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART 10%丢弃率              | 0.000398 | 1540ms   | 1602ms   | DART=true drop=0.10 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART 20%丢弃率              | 0.000475 | 1485ms   | 1546ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART 30%丢弃率              | 0.000490 | 1564ms   | 1626ms   | DART=true drop=0.30 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+
+=== 2. DART丢弃率敏感性测试 ===
+DART 5%丢弃                  | 0.000317 | 2353ms   | 2420ms   | DART=true drop=0.05 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+DART 10%丢弃                 | 0.000361 | 2410ms   | 2493ms   | DART=true drop=0.10 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+DART 15%丢弃                 | 0.000400 | 2391ms   | 2474ms   | DART=true drop=0.15 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+DART 25%丢弃                 | 0.000426 | 2803ms   | 2879ms   | DART=true drop=0.25 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+DART 40%丢弃                 | 0.000435 | 2324ms   | 2399ms   | DART=true drop=0.40 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+DART 50%丢弃                 | 0.000428 | 2184ms   | 2259ms   | DART=true drop=0.50 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+
+=== 3. DART权重归一化测试 ===
+DART 归一化开启           | 0.000475 | 1678ms   | 1745ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART 归一化关闭           | 0.000242 | 1731ms   | 1811ms   | DART=true drop=0.20 norm=false skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+
+=== 4. DART预测模式测试 ===
+DART 训练时dropout          | 0.000475 | 1735ms   | 1805ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART 预测时跳过dropout    | 0.000484 | 1597ms   | 1660ms   | DART=true drop=0.20 norm=true skip=true squared 30 0.1 4 1 mse exhaustive 1.0
+
+=== 5. DART与不同损失函数组合 ===
+DART + Squared Loss            | 0.000475 | 1675ms   | 1741ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART + Huber Loss              | 0.000475 | 1608ms   | 1680ms   | DART=true drop=0.20 norm=true skip=false huber 30 0.1 4 1 mse exhaustive 1.0
+DART + Absolute Loss           | 0.000475 | 1608ms   | 1673ms   | DART=true drop=0.20 norm=true skip=false absolute 30 0.1 4 1 mae exhaustive 1.0
+
+=== 6. DART与不同树深度组合 ===
+DART 深度2                   | 0.000547 | 1161ms   | 1222ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 2 1 mse exhaustive 1.0
+DART 深度3                   | 0.000490 | 1698ms   | 1766ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 3 1 mse exhaustive 1.0
+DART 深度4                   | 0.000435 | 2199ms   | 2271ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+DART 深度6                   | 0.000366 | 3506ms   | 3600ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 6 1 mse exhaustive 1.0
+
+=== 7. DART与不同学习率组合 ===
+DART lr=0.05                   | 0.000619 | 2898ms   | 2970ms   | DART=true drop=0.20 norm=true skip=false squared 50 0.05 4 1 mse exhaustive 1.0
+DART lr=0.1                    | 0.000400 | 3053ms   | 3137ms   | DART=true drop=0.20 norm=true skip=false squared 50 0.1 4 1 mse exhaustive 1.0
+DART lr=0.2                    | 0.000239 | 3272ms   | 3342ms   | DART=true drop=0.20 norm=true skip=false squared 50 0.2 4 1 mse exhaustive 1.0
+DART lr=0.3                    | 0.000226 | 3389ms   | 3487ms   | DART=true drop=0.20 norm=true skip=false squared 50 0.3 4 1 mse exhaustive 1.0
+
+=== 8. DART与分割方法组合 ===
+DART + 穷举分割            | 0.000475 | 1698ms   | 1770ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse exhaustive 1.0
+DART + 随机分割            | 0.000475 | 1599ms   | 1664ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse random 1.0
+DART + 等宽直方图         | 0.000475 | 1696ms   | 1773ms   | DART=true drop=0.20 norm=true skip=false squared 30 0.1 4 1 mse histogram_ew 1.0
+
+=== 9. DART与子采样组合 ===
+DART + 50%子采样            | 0.000435 | 2311ms   | 2386ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 0.5
+DART + 70%子采样            | 0.000435 | 2216ms   | 2284ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 0.7
+DART + 90%子采样            | 0.000435 | 2154ms   | 2221ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 0.9
+DART + 无子采样            | 0.000435 | 2138ms   | 2209ms   | DART=true drop=0.20 norm=true skip=false squared 40 0.1 4 1 mse exhaustive 1.0
+
+=== 10. DART最优配置探索 ===
+保守DART配置               | 0.000439 | 2782ms   | 2856ms   | DART=true drop=0.15 norm=true skip=false squared 50 0.08 4 2 mse exhaustive 0.9
+激进DART配置               | 0.000237 | 3312ms   | 3406ms   | DART=true drop=0.35 norm=true skip=false squared 40 0.15 6 1 mse exhaustive 0.8
+平衡DART配置               | 0.000410 | 2452ms   | 2527ms   | DART=true drop=0.25 norm=true skip=false squared 45 0.1 4 1 mse exhaustive 0.85
+鲁棒DART配置               | 0.000417 | 2414ms   | 2487ms   | DART=true drop=0.20 norm=true skip=false huber 45 0.1 4 3 mse exhaustive 0.9
+
+=== 测试完成 ===
+
+=============================================================================
+测试总结:
+- 总测试项目: 约40个
+- 测试覆盖: DART vs 标准GBRT、丢弃率敏感性、权重归一化、预测模式等
+- 参数组合: 不同损失函数、树深度、学习率、分割方法、子采样率
+- 优化建议: 根据上述结果选择最佳DART配置
+
+注意事项:
+1. TestMSE越小越好
+2. 注意过拟合现象（训练误差很小但测试误差大）
+3. DART通常在迭代次数较多时效果更明显
+4. 适当的丢弃率(10%-30%)通常效果最好
+5. 权重归一化建议开启
+=============================================================================
