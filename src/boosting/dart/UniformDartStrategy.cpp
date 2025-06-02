@@ -77,26 +77,48 @@ void UniformDartStrategy::updateTreeWeights(
     int newTreeIndex,
     double learningRate) const {
     
-    if (!normalizeWeights_ || trees.empty() || newTreeIndex < 0) {
+    if (!normalizeWeights_ || trees.empty()) {
         return;
     }
     
     double k = static_cast<double>(droppedIndices.size());
-    if (k == 0.0) return; // 没有树被丢弃，不修改权重
+    if (k == 0.0) return;
     
-    // **全新的DART权重归一化策略**
-    // 基于论文 "Rashmi, K. V., & Gilad-Bachrach, R. (2015). DART: Dropouts meet Multiple Additive Regression Trees."
-    
-    if (newTreeIndex < static_cast<int>(trees.size())) {
-        // 方法1: 温和的权重补偿
-        // 新树承担被丢弃树的部分责任，但不过度补偿
-        double compensationFactor = 1.0 + k / (10.0 * trees.size()); // 温和补偿
-        trees[newTreeIndex].weight = learningRate * std::min(compensationFactor, 1.3);
+    switch (weightStrategy_) {
+        case DartWeightStrategy::NONE:
+            // 不做任何权重调整
+            break;
+            
+        case DartWeightStrategy::MILD: {
+            // 温和策略：轻微增加新树权重
+            if (newTreeIndex >= 0 && newTreeIndex < static_cast<int>(trees.size())) {
+                double adjustmentFactor = 1.0 + 0.05 * k; // 每丢弃一棵树，权重增加5%
+                trees[newTreeIndex].weight = learningRate * std::min(adjustmentFactor, 1.2);
+            }
+            break;
+        }
         
-        // 方法2: 不修改现有树权重，只调整新树
-        // 保持被丢弃树的原权重不变，避免破坏已学习的模式
+        case DartWeightStrategy::ORIGINAL: {
+            // 原始DART方法：激进调整
+            if (newTreeIndex >= 0 && newTreeIndex < static_cast<int>(trees.size())) {
+                trees[newTreeIndex].weight = learningRate * (k + 1.0);
+            }
+            break;
+        }
+        
+        case DartWeightStrategy::EXPERIMENTAL: {
+            // 实验性方法：基于总损失减少的权重调整
+            if (newTreeIndex >= 0 && newTreeIndex < static_cast<int>(trees.size())) {
+                double totalTrees = static_cast<double>(trees.size());
+                double dropRatio = k / totalTrees;
+                double adaptiveFactor = 1.0 + dropRatio * 0.5; // 自适应调整
+                trees[newTreeIndex].weight = learningRate * adaptiveFactor;
+            }
+            break;
+        }
     }
 }
+
 bool UniformDartStrategy::isTreeDropped(int treeIndex, 
                                        const std::vector<int>& droppedIndices) const {
     return std::find(droppedIndices.begin(), droppedIndices.end(), treeIndex) 
