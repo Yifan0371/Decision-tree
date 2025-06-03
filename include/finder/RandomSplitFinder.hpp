@@ -2,6 +2,8 @@
 #define RANDOM_SPLIT_FINDER_HPP
 #include "tree/ISplitFinder.hpp"
 #include <random>
+#include <tuple>
+#include <vector>
 
 class RandomSplitFinder : public ISplitFinder {
 public:
@@ -15,7 +17,8 @@ public:
         double parentMetric,
         const ISplitCriterion& criterion) const override;
 private:
-    int k_;
-    mutable std::mt19937 gen_;
+    int               k_;
+    mutable std::mt19937 gen_;  // 线程局部 RNG 种子来源
 };
-#endif
+
+#endif // RANDOM_SPLIT_FINDER_HPP
