@@ -118,6 +118,17 @@ private:
                                const std::vector<int>& indices,
                                std::vector<double>& subData,
                                std::vector<double>& subLabels) const;
+    /**
+     * Bootstrap采样（线程安全版本）
+     * @param dataSize 原始数据大小
+     * @param sampleIndices 输出：采样索引
+     * @param oobIndices 输出：袋外索引
+     * @param localGen 线程局部随机数生成器
+     */
+    void bootstrapSample(int dataSize,
+                        std::vector<int>& sampleIndices,
+                        std::vector<int>& oobIndices,
+                        std::mt19937& localGen) const;  // 新增参数
 };
 
 #endif // ENSEMBLE_BAGGING_TRAINER_HPP

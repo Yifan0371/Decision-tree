@@ -1,0 +1,31 @@
+===============================================
+Bagging Weak Scaling Performance Test Log
+运行时间: 2025年 06月 03日 星期二 20:44:00 CEST
+项目根: /home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree
+===============================================
+PROJECT_ROOT=/home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree
+物理核心数 (排除超线程)：4，已设置 OMP_NUM_THREADS=4
+检测到可执行文件：/home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree/build/DecisionTreeMain
+总行数 (不含 header): 14795，物理核数: 4，基准行数 BASE=3698
+===============================================
+    Bagging Weak Scaling Performance Test     
+===============================================
+Fixed Parameters (per thread):
+  Trees: 20 | Sample Ratio: 1.0
+  Max Depth: 10 | Min Leaf: 2
+  Criterion: mse | Finder: exhaustive
+  Base rows per thread: 3698
+
+Threads | SubsetRows | Elapsed(ms) | TestMSE    | TestMAE    | OOB_MSE    | Efficiency
+--------|------------|-------------|------------|------------|------------|----------
+      1 |       3698 |         507 | 0.000203   | 0.007777   | 0.000245   | 1.00
+      2 |       7396 |         521 | 0.000206   | 0.007632   | 0.000211   | .97
+      4 |      14792 |         571 | 0.000180   | 0.006892   | 0.000200   | .88
+
+===============================================
+Weak Scaling Analysis:
+- 理想: 随着线程数增加，处理更多数据但时间保持恒定
+- 效率 = 单线程时间 / 当前时间
+- 关注点: 效率接近1.0表示良好的 weak scaling
+- 数据量按线程数线性增长，计算复杂度也线性增长
+===============================================
