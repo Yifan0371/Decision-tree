@@ -1,6 +1,10 @@
+// src/tree/criterion/MSECriterion.cpp - OpenMP并行版本
 #include "criterion/MSECriterion.hpp"
 #include <numeric>
 #include <cmath>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 double MSECriterion::nodeMetric(const std::vector<double>& labels,
                                 const std::vector<int>& indices) const {
@@ -8,12 +12,13 @@ double MSECriterion::nodeMetric(const std::vector<double>& labels,
     
     size_t n = indices.size();
     
-    // **内存优化：一次遍历同时计算和与平方和**
+    // **并行优化：使用OpenMP并行reduction计算和与平方和**
     double sum = 0.0;
     double sumSq = 0.0;
     
-    for (int idx : indices) {
-        double y = labels[idx];
+    #pragma omp parallel for reduction(+:sum,sumSq) schedule(static) if(n > 1000)
+    for (size_t i = 0; i < n; ++i) {
+        double y = labels[indices[i]];
         sum += y;
         sumSq += y * y;
     }

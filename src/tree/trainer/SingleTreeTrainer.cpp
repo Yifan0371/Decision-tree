@@ -1,3 +1,4 @@
+// src/tree/trainer/SingleTreeTrainer.cpp - OpenMP并行版本
 #include "tree/trainer/SingleTreeTrainer.hpp"
 #include "tree/Node.hpp"
 #include "pruner/MinGainPrePruner.hpp"
@@ -5,6 +6,9 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 SingleTreeTrainer::SingleTreeTrainer(std::unique_ptr<ISplitFinder>   finder,
                                      std::unique_ptr<ISplitCriterion> criterion,
@@ -22,10 +26,15 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
                               const std::vector<double>& labels) {
     root_ = std::make_unique<Node>();
     std::vector<int> indices(labels.size());
-    std::iota(indices.begin(), indices.end(), 0);
     
-    // 使用就地划分的递归分裂
-    splitNodeInPlace(root_.get(), data, rowLength, labels, indices, 0);
+    // 并行初始化索引数组
+    #pragma omp parallel for schedule(static) if(labels.size() > 10000)
+    for (size_t i = 0; i < labels.size(); ++i) {
+        indices[i] = static_cast<int>(i);
+    }
+    
+    // 使用并行的递归分裂
+    splitNodeInPlaceParallel(root_.get(), data, rowLength, labels, indices, 0);
     
     // 训练完成后调用后剪枝
     pruner_->prune(root_);
@@ -36,12 +45,12 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     std::cout << "Tree: depth=" << treeDepth << ", leaves=" << leafCount;
 }
 
-void SingleTreeTrainer::splitNodeInPlace(Node* node,
-                                         const std::vector<double>& data,
-                                         int rowLength,
-                                         const std::vector<double>& labels,
-                                         std::vector<int>& indices,  // 注意：非const引用，允许就地修改
-                                         int depth) {
+void SingleTreeTrainer::splitNodeInPlaceParallel(Node* node,
+                                                 const std::vector<double>& data,
+                                                 int rowLength,
+                                                 const std::vector<double>& labels,
+                                                 std::vector<int>& indices,
+                                                 int depth) {
     if (indices.empty()) {
         node->makeLeaf(0.0);
         return;
@@ -50,9 +59,12 @@ void SingleTreeTrainer::splitNodeInPlace(Node* node,
     node->metric  = criterion_->nodeMetric(labels, indices);
     node->samples = indices.size();
     
-    // 计算节点预测值（均值）
-    double sum = 0;
-    for (int idx : indices) sum += labels[idx];
+    // 并行计算节点预测值（均值）
+    double sum = 0.0;
+    #pragma omp parallel for reduction(+:sum) schedule(static) if(indices.size() > 1000)
+    for (size_t i = 0; i < indices.size(); ++i) {
+        sum += labels[indices[i]];
+    }
     double nodePrediction = sum / indices.size();
     
     // 停止条件检查
@@ -84,7 +96,7 @@ void SingleTreeTrainer::splitNodeInPlace(Node* node,
         }
     }
 
-    // **关键优化：使用std::partition进行就地划分**
+    // **并行优化：使用std::partition进行就地划分**
     auto partitionPoint = std::partition(indices.begin(), indices.end(),
         [&](int idx) {
             return data[idx * rowLength + bestFeat] <= bestThr;
@@ -112,16 +124,41 @@ void SingleTreeTrainer::splitNodeInPlace(Node* node,
     node->info.internal.left = node->leftChild.get();
     node->info.internal.right = node->rightChild.get();
 
-    // **内存优化：使用临时向量避免重复分配**
-    // 创建左子集索引（复制左半部分）
+    // **内存优化：创建左右子集索引**
     std::vector<int> leftIndices(indices.begin(), partitionPoint);
-    
-    // 创建右子集索引（复制右半部分）
     std::vector<int> rightIndices(partitionPoint, indices.end());
     
-    // 递归处理子节点
-    splitNodeInPlace(node->leftChild.get(),  data, rowLength, labels, leftIndices,  depth + 1);
-    splitNodeInPlace(node->rightChild.get(), data, rowLength, labels, rightIndices, depth + 1);
+    // **并行递归处理：在合适的深度开始并行**
+    // 只在树的上层启用并行（避免过度并行化的开销）
+    const int PARALLEL_THRESHOLD_DEPTH = 3;
+    const size_t PARALLEL_THRESHOLD_SIZE = 5000;
+    
+    bool useParallel = (depth < PARALLEL_THRESHOLD_DEPTH) && 
+                      (leftIndices.size() > PARALLEL_THRESHOLD_SIZE || 
+                       rightIndices.size() > PARALLEL_THRESHOLD_SIZE);
+    
+    if (useParallel) {
+        // 使用OpenMP task并行处理左右子树
+        #pragma omp parallel sections if(depth <= 2)
+        {
+            #pragma omp section
+            {
+                splitNodeInPlaceParallel(node->leftChild.get(), data, rowLength, 
+                                        labels, leftIndices, depth + 1);
+            }
+            #pragma omp section  
+            {
+                splitNodeInPlaceParallel(node->rightChild.get(), data, rowLength, 
+                                        labels, rightIndices, depth + 1);
+            }
+        }
+    } else {
+        // 串行递归处理（避免过度并行化）
+        splitNodeInPlaceParallel(node->leftChild.get(),  data, rowLength, 
+                                labels, leftIndices,  depth + 1);
+        splitNodeInPlaceParallel(node->rightChild.get(), data, rowLength, 
+                                labels, rightIndices, depth + 1);
+    }
 }
 
 double SingleTreeTrainer::predict(const double* sample,
@@ -140,13 +177,18 @@ void SingleTreeTrainer::evaluate(const std::vector<double>& X,
                                  double& mse,
                                  double& mae) {
     size_t n = y.size();
-    mse = 0; mae = 0;
+    mse = 0.0;
+    mae = 0.0;
+    
+    // 并行计算预测和误差
+    #pragma omp parallel for reduction(+:mse,mae) schedule(static) if(n > 1000)
     for (size_t i = 0; i < n; ++i) {
         double pred = predict(&X[i * rowLength], rowLength);
         double diff = y[i] - pred;
         mse += diff * diff;
         mae += std::abs(diff);
     }
+    
     mse /= n;
     mae /= n;
 }
@@ -165,7 +207,7 @@ void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth,
     }
 }
 
-// 保留原有splitNode方法以维持API兼容性（内部调用优化版本）
+// 保留原有splitNode方法以维持API兼容性
 void SingleTreeTrainer::splitNode(Node* node,
                                   const std::vector<double>& data,
                                   int rowLength,
@@ -174,5 +216,15 @@ void SingleTreeTrainer::splitNode(Node* node,
                                   int depth) {
     // 创建索引的副本以供就地修改
     std::vector<int> mutableIndices = indices;
-    splitNodeInPlace(node, data, rowLength, labels, mutableIndices, depth);
+    splitNodeInPlaceParallel(node, data, rowLength, labels, mutableIndices, depth);
+}
+
+// 新增并行版本的splitNodeInPlace，与原版API兼容
+void SingleTreeTrainer::splitNodeInPlace(Node* node,
+                                         const std::vector<double>& data,
+                                         int rowLength,
+                                         const std::vector<double>& labels,
+                                         std::vector<int>& indices,
+                                         int depth) {
+    splitNodeInPlaceParallel(node, data, rowLength, labels, indices, depth);
 }

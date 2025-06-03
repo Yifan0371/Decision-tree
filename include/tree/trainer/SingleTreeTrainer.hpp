@@ -1,3 +1,4 @@
+// include/tree/trainer/SingleTreeTrainer.hpp - OpenMP并行版本
 #ifndef TREE_SINGLE_TRAINER_HPP
 #define TREE_SINGLE_TRAINER_HPP
 
@@ -40,13 +41,21 @@ private:
                    const std::vector<int>& indices,
                    int depth);
 
-    // **新增：内存优化的就地划分方法**
+    // **原有的就地划分方法**
     void splitNodeInPlace(Node* node,
                           const std::vector<double>& data,
                           int rowLength,
                           const std::vector<double>& labels,
                           std::vector<int>& indices,  // 非const引用，允许就地修改
                           int depth);
+
+    // **新增：并行版本的就地划分方法**
+    void splitNodeInPlaceParallel(Node* node,
+                                  const std::vector<double>& data,
+                                  int rowLength,
+                                  const std::vector<double>& labels,
+                                  std::vector<int>& indices,  // 非const引用，允许就地修改
+                                  int depth);
 
     void calculateTreeStats(const Node* node,
                             int currentDepth,
