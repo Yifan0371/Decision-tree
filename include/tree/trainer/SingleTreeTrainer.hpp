@@ -6,7 +6,7 @@
 #include "../ISplitFinder.hpp"
 #include "../ISplitCriterion.hpp"
 #include "../IPruner.hpp"
-#include "../../pruner/MinGainPrePruner.hpp"  // for dynamic_cast
+#include "../../pruner/MinGainPrePruner.hpp"
 #include <memory>
 #include <vector>
 #include <iostream>
@@ -41,20 +41,19 @@ private:
                    const std::vector<int>& indices,
                    int depth);
 
-    // **原有的就地划分方法**
     void splitNodeInPlace(Node* node,
                           const std::vector<double>& data,
                           int rowLength,
                           const std::vector<double>& labels,
-                          std::vector<int>& indices,  // 非const引用，允许就地修改
+                          std::vector<int>& indices,
                           int depth);
 
-    // **新增：并行版本的就地划分方法**
+    // 智能并行版本（根据数据大小自动选择策略）
     void splitNodeInPlaceParallel(Node* node,
                                   const std::vector<double>& data,
                                   int rowLength,
                                   const std::vector<double>& labels,
-                                  std::vector<int>& indices,  // 非const引用，允许就地修改
+                                  std::vector<int>& indices,
                                   int depth);
 
     void calculateTreeStats(const Node* node,
@@ -67,7 +66,6 @@ private:
     std::unique_ptr<ISplitFinder>    finder_;
     std::unique_ptr<ISplitCriterion> criterion_;
     std::unique_ptr<IPruner>         pruner_;
-    // 移除重复的 root_ 定义，使用基类的 root_
 };
 
 #endif // TREE_SINGLE_TRAINER_HPP

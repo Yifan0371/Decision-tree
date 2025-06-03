@@ -1,4 +1,4 @@
-// src/tree/trainer/SingleTreeTrainer.cpp - OpenMP并行版本
+// src/tree/trainer/SingleTreeTrainer.cpp - 深度优化的OpenMP并行版本
 #include "tree/trainer/SingleTreeTrainer.hpp"
 #include "tree/Node.hpp"
 #include "pruner/MinGainPrePruner.hpp"
@@ -6,6 +6,9 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <memory>
+#include <chrono>
+#include <iomanip>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -24,27 +27,70 @@ SingleTreeTrainer::SingleTreeTrainer(std::unique_ptr<ISplitFinder>   finder,
 void SingleTreeTrainer::train(const std::vector<double>& data,
                               int rowLength,
                               const std::vector<double>& labels) {
+    
+    auto trainStart = std::chrono::high_resolution_clock::now();
+    
+    // **优化1: 预分配根节点并设置线程数**
     root_ = std::make_unique<Node>();
+    
+    #ifdef _OPENMP
+    omp_set_dynamic(1);  // 允许运行时调整线程数
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            std::cout << "Using " << omp_get_num_threads() << " OpenMP threads" << std::endl;
+        }
+    }
+    #endif
+    
+    // **优化2: 预分配索引数组并并行初始化**
     std::vector<int> indices(labels.size());
     
-    // 并行初始化索引数组
-    #pragma omp parallel for schedule(static) if(labels.size() > 10000)
+    #pragma omp parallel for schedule(static, 1024) if(labels.size() > 5000)
     for (size_t i = 0; i < labels.size(); ++i) {
         indices[i] = static_cast<int>(i);
     }
     
-    // 使用并行的递归分裂
+    // **优化3: 智能并行策略选择**
+    if (labels.size() > 5000) {
+        std::cout << "Large dataset detected (" << labels.size() 
+                  << " samples), using enhanced parallel strategy" << std::endl;
+    } else if (labels.size() > 1000) {
+        std::cout << "Medium dataset detected, using balanced parallel strategy" << std::endl;
+    } else {
+        std::cout << "Small dataset detected, using conservative parallel strategy" << std::endl;
+    }
+    
     splitNodeInPlaceParallel(root_.get(), data, rowLength, labels, indices, 0);
     
-    // 训练完成后调用后剪枝
-    pruner_->prune(root_);
+    auto splitEnd = std::chrono::high_resolution_clock::now();
     
-    // 简化的统计信息输出
+    // 后剪枝
+    auto pruneStart = std::chrono::high_resolution_clock::now();
+    pruner_->prune(root_);
+    auto pruneEnd = std::chrono::high_resolution_clock::now();
+    
+    auto trainEnd = std::chrono::high_resolution_clock::now();
+    
+    // **优化4: 详细的性能统计**
+    auto splitTime = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - trainStart);
+    auto pruneTime = std::chrono::duration_cast<std::chrono::milliseconds>(pruneEnd - pruneStart);
+    auto totalTime = std::chrono::duration_cast<std::chrono::milliseconds>(trainEnd - trainStart);
+    
     int treeDepth = 0, leafCount = 0;
     calculateTreeStats(root_.get(), 0, treeDepth, leafCount);
-    std::cout << "Tree: depth=" << treeDepth << ", leaves=" << leafCount;
+    
+    std::cout << "Tree training completed:" << std::endl;
+    std::cout << "  Depth: " << treeDepth << " | Leaves: " << leafCount << std::endl;
+    std::cout << "  Split time: " << splitTime.count() << "ms" 
+              << " | Prune time: " << pruneTime.count() << "ms"
+              << " | Total: " << totalTime.count() << "ms" << std::endl;
+    std::cout << "  Samples/ms: " << std::fixed << std::setprecision(1) 
+              << (labels.size() / static_cast<double>(std::max(1L, totalTime.count()))) << std::endl;
 }
 
+// **智能并行策略 - 根据数据大小自动调整**
 void SingleTreeTrainer::splitNodeInPlaceParallel(Node* node,
                                                  const std::vector<double>& data,
                                                  int rowLength,
@@ -59,11 +105,18 @@ void SingleTreeTrainer::splitNodeInPlaceParallel(Node* node,
     node->metric  = criterion_->nodeMetric(labels, indices);
     node->samples = indices.size();
     
-    // 并行计算节点预测值（均值）
+    // **优化: 智能并行计算节点预测值**
     double sum = 0.0;
-    #pragma omp parallel for reduction(+:sum) schedule(static) if(indices.size() > 1000)
-    for (size_t i = 0; i < indices.size(); ++i) {
-        sum += labels[indices[i]];
+    if (indices.size() > 1000) {
+        #pragma omp parallel for reduction(+:sum) schedule(static)
+        for (size_t i = 0; i < indices.size(); ++i) {
+            sum += labels[indices[i]];
+        }
+    } else {
+        // 小数据集使用串行计算
+        for (size_t i = 0; i < indices.size(); ++i) {
+            sum += labels[indices[i]];
+        }
     }
     double nodePrediction = sum / indices.size();
     
@@ -76,19 +129,16 @@ void SingleTreeTrainer::splitNodeInPlaceParallel(Node* node,
     }
 
     // 寻找最佳分裂
-    int   bestFeat;
-    double bestThr, bestGain;
-    std::tie(bestFeat, bestThr, bestGain) =
+    auto [bestFeat, bestThr, bestGain] =
         finder_->findBestSplit(data, rowLength, labels, indices,
                                node->metric, *criterion_);
 
-    // 检查分裂有效性
     if (bestFeat < 0 || bestGain <= 0) {
         node->makeLeaf(nodePrediction, nodePrediction);
         return;
     }
 
-    // **预剪枝检查**：如果是 MinGainPrePruner，检查增益阈值
+    // 预剪枝检查
     if (auto* prePruner = dynamic_cast<const MinGainPrePruner*>(pruner_.get())) {
         if (bestGain < prePruner->minGain()) {
             node->makeLeaf(nodePrediction, nodePrediction);
@@ -96,49 +146,37 @@ void SingleTreeTrainer::splitNodeInPlaceParallel(Node* node,
         }
     }
 
-    // **并行优化：使用std::partition进行就地划分**
+    // **优化: 智能分割策略**
     auto partitionPoint = std::partition(indices.begin(), indices.end(),
         [&](int idx) {
             return data[idx * rowLength + bestFeat] <= bestThr;
         });
     
-    // 计算左右子集大小
     size_t leftSize = std::distance(indices.begin(), partitionPoint);
     size_t rightSize = indices.size() - leftSize;
     
-    // 检查分裂后样本数约束
     if (leftSize < static_cast<size_t>(minSamplesLeaf_) || 
         rightSize < static_cast<size_t>(minSamplesLeaf_)) {
         node->makeLeaf(nodePrediction, nodePrediction);
         return;
     }
 
-    // 设置为内部节点
     node->makeInternal(bestFeat, bestThr);
-    
-    // 创建子节点
     node->leftChild  = std::make_unique<Node>();
     node->rightChild = std::make_unique<Node>();
-    
-    // 更新union中的指针（用于访问）
     node->info.internal.left = node->leftChild.get();
     node->info.internal.right = node->rightChild.get();
 
-    // **内存优化：创建左右子集索引**
     std::vector<int> leftIndices(indices.begin(), partitionPoint);
     std::vector<int> rightIndices(partitionPoint, indices.end());
     
-    // **并行递归处理：在合适的深度开始并行**
-    // 只在树的上层启用并行（避免过度并行化的开销）
-    const int PARALLEL_THRESHOLD_DEPTH = 3;
-    const size_t PARALLEL_THRESHOLD_SIZE = 5000;
+    // **优化: 智能并行递归策略**
+    // 根据数据大小和深度动态决定是否使用并行
+    bool useParallelRecursion = (depth <= 3) && 
+                               (indices.size() > 2000) &&
+                               (leftIndices.size() > 500 || rightIndices.size() > 500);
     
-    bool useParallel = (depth < PARALLEL_THRESHOLD_DEPTH) && 
-                      (leftIndices.size() > PARALLEL_THRESHOLD_SIZE || 
-                       rightIndices.size() > PARALLEL_THRESHOLD_SIZE);
-    
-    if (useParallel) {
-        // 使用OpenMP task并行处理左右子树
+    if (useParallelRecursion) {
         #pragma omp parallel sections if(depth <= 2)
         {
             #pragma omp section
@@ -153,7 +191,7 @@ void SingleTreeTrainer::splitNodeInPlaceParallel(Node* node,
             }
         }
     } else {
-        // 串行递归处理（避免过度并行化）
+        // 串行递归处理
         splitNodeInPlaceParallel(node->leftChild.get(),  data, rowLength, 
                                 labels, leftIndices,  depth + 1);
         splitNodeInPlaceParallel(node->rightChild.get(), data, rowLength, 
@@ -176,12 +214,14 @@ void SingleTreeTrainer::evaluate(const std::vector<double>& X,
                                  const std::vector<double>& y,
                                  double& mse,
                                  double& mae) {
+    auto evalStart = std::chrono::high_resolution_clock::now();
+    
     size_t n = y.size();
     mse = 0.0;
     mae = 0.0;
     
-    // 并行计算预测和误差
-    #pragma omp parallel for reduction(+:mse,mae) schedule(static) if(n > 1000)
+    // **优化: 并行预测和误差计算**
+    #pragma omp parallel for reduction(+:mse,mae) schedule(static, 256) if(n > 1000)
     for (size_t i = 0; i < n; ++i) {
         double pred = predict(&X[i * rowLength], rowLength);
         double diff = y[i] - pred;
@@ -191,6 +231,11 @@ void SingleTreeTrainer::evaluate(const std::vector<double>& X,
     
     mse /= n;
     mae /= n;
+    
+    auto evalEnd = std::chrono::high_resolution_clock::now();
+    auto evalTime = std::chrono::duration_cast<std::chrono::milliseconds>(evalEnd - evalStart);
+    
+    std::cout << "Evaluation completed in " << evalTime.count() << "ms" << std::endl;
 }
 
 void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth, 
@@ -207,19 +252,17 @@ void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth,
     }
 }
 
-// 保留原有splitNode方法以维持API兼容性
+// 保留原有方法以维持API兼容性
 void SingleTreeTrainer::splitNode(Node* node,
                                   const std::vector<double>& data,
                                   int rowLength,
                                   const std::vector<double>& labels,
                                   const std::vector<int>& indices,
                                   int depth) {
-    // 创建索引的副本以供就地修改
     std::vector<int> mutableIndices = indices;
     splitNodeInPlaceParallel(node, data, rowLength, labels, mutableIndices, depth);
 }
 
-// 新增并行版本的splitNodeInPlace，与原版API兼容
 void SingleTreeTrainer::splitNodeInPlace(Node* node,
                                          const std::vector<double>& data,
                                          int rowLength,
