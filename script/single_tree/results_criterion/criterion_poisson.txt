@@ -1,3 +1,0 @@
-Data: ../../data/data_clean/cleaned_data.csv | Depth: 20 | MinLeaf: 5 | Criterion: poisson | Split: exhaustive | Pruner: none
-Tree: depth=19, leaves=595 | Pruner: none
-MSE: 0.000294 | MAE: 0.008382 | Train: 132ms | Total: 172ms

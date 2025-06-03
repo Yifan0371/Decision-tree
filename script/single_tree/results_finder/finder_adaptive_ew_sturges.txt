@@ -1,3 +1,0 @@
-Data: ../../data/data_clean/cleaned_data.csv | Depth: 20 | MinLeaf: 5 | Criterion: mse | Split: adaptive_ew:sturges | Pruner: none
-Tree: depth=20, leaves=1049 | Pruner: none
-MSE: 0.000276 | MAE: 0.008331 | Train: 89ms | Total: 128ms

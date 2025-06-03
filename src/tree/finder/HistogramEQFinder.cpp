@@ -1,9 +1,11 @@
+// HistogramEQFinder.cpp
 #include "finder/HistogramEQFinder.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <omp.h>  // 新增 OpenMP 头文件
 
 std::tuple<int, double, double>
 HistogramEQFinder::findBestSplit(const std::vector<double>& X,   // 行优先特征矩阵
@@ -13,64 +15,78 @@ HistogramEQFinder::findBestSplit(const std::vector<double>& X,   // 行优先特
                                  double                     parentMetric,
                                  const ISplitCriterion&     crit) const
 {
-    if (idx.size() < 2) return {-1, 0.0, 0.0};
+    const size_t N = idx.size();
+    if (N < 2) return {-1, 0.0, 0.0};
 
     /* ---------- 预分配可复用缓冲 ---------- */
     std::vector<int> sortedIdx(idx.size());
     std::vector<int> leftBuf, rightBuf;
-    leftBuf.reserve(idx.size());
-    rightBuf.reserve(idx.size());
+    leftBuf.reserve(N);
+    rightBuf.reserve(N);
 
-    const int  B   = std::max(1, bins_);
-    const int  per = std::max(1, static_cast<int>(idx.size()) / B);
-    const size_t N = idx.size();
+    const int B   = std::max(1, bins_);
+    const int per = std::max(1, static_cast<int>(N) / B);
     const double EPS = 1e-12;
 
     int    bestFeat = -1;
     double bestThr  = 0.0;
     double bestGain = -std::numeric_limits<double>::infinity();
 
-    /* ---------- 遍历每个特征 ---------- */
+    /* ---------- 并行遍历每个特征 ---------- */
+    #pragma omp parallel for schedule(dynamic)
     for (int f = 0; f < D; ++f) {
+        // 每个线程维护自己的局部最优
+        double localBestGain = -std::numeric_limits<double>::infinity();
+        double localBestThr  = 0.0;
 
-        /* ---- 拷贝并按特征值排序索引 ---- */
-        std::copy(idx.begin(), idx.end(), sortedIdx.begin());
-        std::sort(sortedIdx.begin(), sortedIdx.end(),
+        // 1. 拷贝并按特征值排序索引
+        std::vector<int> localSorted = idx;  // 每个线程独立的排序缓冲
+        std::sort(localSorted.begin(), localSorted.end(),
                   [&](int a, int b) {
                       return X[a * D + f] < X[b * D + f];
                   });
-        if (sortedIdx.size() < 2) continue;
+        if (localSorted.size() < 2) continue;
 
-        /* ---- 按等频步长遍历 pivot ---- */
+        // 2. 按等频步长遍历 pivot
         for (size_t pivot = per; pivot < N; pivot += per) {
-            /* 相邻值相同则跳过（避免零增益分割） */
-            double vL = X[sortedIdx[pivot - 1] * D + f];
-            double vR = X[sortedIdx[pivot]     * D + f];
-            if (std::fabs(vR - vL) < EPS) continue;
+            double vL = X[localSorted[pivot - 1] * D + f];
+            double vR = X[localSorted[pivot]     * D + f];
+            if (std::fabs(vR - vL) < EPS) continue;  // 相邻值相同跳过
 
-            /* --- 构造左右子集索引（缓冲复用） --- */
-            leftBuf.clear();
-            rightBuf.clear();
+            // 构造左右子集索引（每个线程独立缓冲）
+            std::vector<int> localLeft, localRight;
+            localLeft.reserve(pivot);
+            localRight.reserve(N - pivot);
 
-            leftBuf.insert(leftBuf.end(),
-                           sortedIdx.begin(),
-                           sortedIdx.begin() + pivot);
-            rightBuf.insert(rightBuf.end(),
-                            sortedIdx.begin() + pivot,
-                            sortedIdx.end());
+            localLeft.insert(localLeft.end(),
+                             localSorted.begin(),
+                             localSorted.begin() + pivot);
+            localRight.insert(localRight.end(),
+                              localSorted.begin() + pivot,
+                              localSorted.end());
 
-            double mL = crit.nodeMetric(y, leftBuf);
-            double mR = crit.nodeMetric(y, rightBuf);
+            // 计算左右子节点的度量值（criterion 内部可能也并行）
+            double mL = crit.nodeMetric(y, localLeft);
+            double mR = crit.nodeMetric(y, localRight);
             double gain = parentMetric -
-                (mL * leftBuf.size() + mR * rightBuf.size()) / N;
+                          (mL * localLeft.size() + mR * localRight.size()) / static_cast<double>(N);
 
-            if (gain > bestGain) {
-                bestGain = gain;
-                bestFeat = f;
-                bestThr  = 0.5 * (vL + vR);   // 阈值取中点
+            if (gain > localBestGain) {
+                localBestGain = gain;
+                localBestThr  = 0.5 * (vL + vR);  // 阈值取中点
             }
         }
-    }
+
+        // 用 critical 区块更新全局最优
+        #pragma omp critical
+        {
+            if (localBestGain > bestGain) {
+                bestGain = localBestGain;
+                bestFeat = f;
+                bestThr  = localBestThr;
+            }
+        }
+    } // 并行 for 结束
 
     return {bestFeat, bestThr, bestGain};
 }

@@ -1,3 +1,0 @@
-Data: ../../data/data_clean/cleaned_data.csv | Depth: 20 | MinLeaf: 5 | Criterion: mse | Split: adaptive_eq | Pruner: none
-Tree: depth=20, leaves=1524 | Pruner: none
-MSE: 0.000260 | MAE: 0.008057 | Train: 294ms | Total: 334ms
