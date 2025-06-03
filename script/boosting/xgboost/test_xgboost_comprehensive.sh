@@ -3,7 +3,6 @@
 # =============================================================================
 # script/boosting/xgboost/test_xgboost_comprehensive.sh
 # XGBoost 全面参数测试脚本
-# 在项目根目录运行: bash script/boosting/xgboost/test_xgboost_comprehensive.sh
 # =============================================================================
 
 DATA_PATH="/data/data_base/cleaned_data.csv"

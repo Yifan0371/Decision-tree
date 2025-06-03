@@ -1,5 +1,5 @@
 // =============================================================================
-// include/boosting/trainer/GBRTTrainer.hpp (需要修改的部分)
+// include/boosting/trainer/GBRTTrainer.hpp - 添加并行方法声明
 // =============================================================================
 #ifndef BOOSTING_TRAINER_GBRTTRAINER_HPP
 #define BOOSTING_TRAINER_GBRTTRAINER_HPP
@@ -7,11 +7,11 @@
 #include "../model/RegressionBoostingModel.hpp"
 #include "../strategy/GradientRegressionStrategy.hpp"
 #include "tree/trainer/SingleTreeTrainer.hpp"
-#include "../dart/IDartStrategy.hpp"  // 新增：DART策略接口
+#include "../dart/IDartStrategy.hpp"
 #include <memory>
 #include <iostream>
 #include <vector>
-#include <random>  // 新增：随机数生成器
+#include <random>
 
 /** 梯度提升回归树配置 */
 struct GBRTConfig {
@@ -21,7 +21,7 @@ struct GBRTConfig {
     int maxDepth = 6;                  
     int minSamplesLeaf = 1;            
     
-    // 决策树参数（复用你现有的分割器和准则）
+    // 决策树参数
     std::string criterion = "mse";     
     std::string splitMethod = "exhaustive";  
     std::string prunerType = "none";   
@@ -33,24 +33,22 @@ struct GBRTConfig {
     double tolerance = 1e-7;           
     
     // 正则化参数
-    double subsample = 1.0;            // 样本采样比例
+    double subsample = 1.0;
     
     // 性能优化
-    bool useLineSearch = false;        // 是否使用线搜索优化学习率
+    bool useLineSearch = false;
     
-    // === 新增DART参数 ===
-    bool enableDart = false;                    // 是否启用DART
-    double dartDropRate = 0.1;                 // 树丢弃率 [0.0, 1.0)
-    bool dartNormalize = true;                 // 是否DART权重归一化
-    bool dartSkipDropForPrediction = false;    // 预测时是否跳过dropout
-    std::string dartStrategy = "uniform";      // DART策略：目前只支持uniform
-    uint32_t dartSeed = 42;                   // DART随机种子
+    // DART参数
+    bool enableDart = false;
+    double dartDropRate = 0.1;
+    bool dartNormalize = true;
+    bool dartSkipDropForPrediction = false;
+    std::string dartStrategy = "uniform";
+    uint32_t dartSeed = 42;
     std::string dartWeightStrategy = "mild";
-
-    
 };
 
-/** 梯度提升回归树训练器 */
+/** 梯度提升回归树训练器 - 深度并行优化版本 */
 class GBRTTrainer {
 public:
     explicit GBRTTrainer(const GBRTConfig& config,
@@ -82,7 +80,7 @@ public:
         return model_.getFeatureImportance(numFeatures);
     }
     
-    /** GBRT特有方法：设置验证集用于早停 */
+    /** 设置验证集用于早停 */
     void setValidationData(const std::vector<double>& X_val,
                           const std::vector<double>& y_val,
                           int rowLength) {
@@ -105,14 +103,14 @@ private:
     int valRowLength_;
     bool hasValidation_ = false;
     
-    // === 新增DART相关成员 ===
+    // DART相关成员
     std::unique_ptr<IDartStrategy> dartStrategy_;
     mutable std::mt19937 dartGen_;
     
-    /** 创建单树训练器（复用你现有的SingleTreeTrainer） */
+    /** 创建单树训练器 */
     std::unique_ptr<SingleTreeTrainer> createTreeTrainer() const;
     
-    /** 计算基准分数（回归任务通常用均值） */
+    /** 计算基准分数 */
     double computeBaseScore(const std::vector<double>& y) const;
     
     /** 检查早停条件 */
@@ -130,8 +128,7 @@ private:
     /** 计算验证集损失 */
     double computeValidationLoss(const std::vector<double>& predictions) const;
     
-    // === 新增DART相关方法 ===
-    /** 创建DART策略 */
+    // DART相关方法
     std::unique_ptr<IDartStrategy> createDartStrategy() const;
     
     /** 标准GBRT训练 */
@@ -144,8 +141,30 @@ private:
                       int rowLength,
                       const std::vector<double>& y);
     
-    /** 计算带dropout的当前预测 */
+    /** 原有方法：计算带dropout的当前预测 */
     void updatePredictionsWithDropout(
+        const std::vector<double>& X,
+        int rowLength,
+        const std::vector<int>& droppedTrees,
+        std::vector<double>& predictions) const;
+    
+    // =============================================
+    // 新增并行优化方法
+    // =============================================
+    
+    /** 批量树预测的并行版本 */
+    void batchTreePredict(const SingleTreeTrainer* trainer,
+                         const std::vector<double>& X,
+                         int rowLength,
+                         std::vector<double>& predictions) const;
+    
+    /** 批量模型预测的并行版本 */
+    void batchModelPredict(const std::vector<double>& X,
+                          int rowLength,
+                          std::vector<double>& predictions) const;
+    
+    /** DART dropout预测重计算的并行版本 */
+    void updatePredictionsWithDropoutParallel(
         const std::vector<double>& X,
         int rowLength,
         const std::vector<int>& droppedTrees,

@@ -1,3 +1,6 @@
+// =============================================================================
+// include/xgboost/trainer/XGBoostTrainer.hpp - 添加并行方法声明
+// =============================================================================
 #ifndef XGBOOST_TRAINER_XGBOOSTTRAINER_HPP
 #define XGBOOST_TRAINER_XGBOOSTTRAINER_HPP
 
@@ -13,8 +16,8 @@
 #include <chrono>
 
 /**
- * XGBoostTrainer：实现完整的 XGBoost 算法，
- * 已改造为“预排序 + 掩码过滤”版本。
+ * XGBoostTrainer：实现完整的 XGBoost 算法
+ * 深度OpenMP并行优化版本
  */
 class XGBoostTrainer : public ITreeTrainer {
 public:
@@ -69,7 +72,11 @@ private:
     int valRowLength_;
     bool hasValidation_ = false;
 
-    /** 训练单棵 XGBoost 树（已改造），传入根节点掩码和全局预排序结果 */
+    // =============================================
+    // 原有方法（保持兼容性）
+    // =============================================
+    
+    /** 训练单棵 XGBoost 树 */
     std::unique_ptr<Node> trainSingleTree(
         const std::vector<double>& X,
         int rowLength,
@@ -78,7 +85,7 @@ private:
         const std::vector<char>& rootMask,
         const std::vector<std::vector<int>>& sortedIndicesAll) const;
 
-    /** 递归构建 XGBoost 树节点（已改造） */
+    /** 递归构建 XGBoost 树节点 */
     void buildXGBNode(Node* node,
                       const std::vector<double>& X,
                       int rowLength,
@@ -91,7 +98,7 @@ private:
     /** 计算基准分数 */
     double computeBaseScore(const std::vector<double>& y) const;
 
-    /** 数据采样（支持行采样），不变 */
+    /** 数据采样 */
     void sampleData(const std::vector<double>& X,
                     int rowLength,
                     const std::vector<double>& gradients,
@@ -104,6 +111,61 @@ private:
 
     /** 计算验证集损失 */
     double computeValidationLoss() const;
+    
+    // =============================================
+    // 新增：深度并行优化方法
+    // =============================================
+    
+    /** 并行优化的单树训练 */
+    std::unique_ptr<Node> trainSingleTreeParallel(
+        const std::vector<double>& X,
+        int rowLength,
+        const std::vector<double>& gradients,
+        const std::vector<double>& hessians,
+        const std::vector<char>& rootMask,
+        const std::vector<std::vector<int>>& sortedIndicesAll) const;
+
+    /** 并行优化的节点构建 */
+    void buildXGBNodeParallel(Node* node,
+                             const std::vector<double>& X,
+                             int rowLength,
+                             const std::vector<double>& gradients,
+                             const std::vector<double>& hessians,
+                             const std::vector<char>& nodeMask,
+                             const std::vector<std::vector<int>>& sortedIndicesAll,
+                             int depth) const;
+
+    /** 并行预测更新 */
+    void updatePredictionsParallel(const std::vector<double>& data,
+                                  int rowLength,
+                                  const Node* tree,
+                                  std::vector<double>& predictions) const;
+
+    /** 并行收敛检查 */
+    bool shouldConverge(const std::vector<double>& gradients) const;
+    
+    // =============================================
+    // 性能监控和优化工具
+    // =============================================
+    
+    /** 估算内存使用量 */
+    size_t estimateMemoryUsage(size_t sampleCount, int featureCount) const {
+        // 预排序索引 + 梯度/Hessian + 预测值 + 掩码
+        return sampleCount * (featureCount * sizeof(int) + 4 * sizeof(double) + sizeof(char));
+    }
+    
+    /** 获取并行性能统计 */
+    struct ParallelStats {
+        double totalTime;
+        double parallelTime;
+        double serialTime;
+        double efficiency;
+    };
+    
+    ParallelStats getParallelStats() const {
+        // 实现性能统计逻辑
+        return {0.0, 0.0, 0.0, 0.0};
+    }
 };
 
 #endif // XGBOOST_TRAINER_XGBOOSTTRAINER_HPP
