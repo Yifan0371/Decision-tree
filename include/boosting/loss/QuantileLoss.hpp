@@ -1,18 +1,13 @@
-
-// =============================================================================
-// include/boosting/loss/QuantileLoss.hpp
-// =============================================================================
-#ifndef BOOSTING_LOSS_QUANTILELOSS_HPP
-#define BOOSTING_LOSS_QUANTILELOSS_HPP
+#pragma once
 
 #include "IRegressionLoss.hpp"
 #include <cmath>
 
-/** 分位数损失函数：用于分位数回归 */
+
 class QuantileLoss : public IRegressionLoss {
 public:
     explicit QuantileLoss(double quantile = 0.5) : quantile_(quantile) {
-        // 确保分位数在有效范围内
+        
         if (quantile <= 0.0 || quantile >= 1.0) {
             quantile_ = 0.5;
         }
@@ -36,8 +31,8 @@ public:
         }
     }
     
-    double hessian(double /* y_true */, double /* y_pred */) const override {
-        return 0.0;  // 分位数损失的二阶导数为0
+    double hessian(double , double ) const override {
+        return 0.0;  
     }
     
     std::string name() const override { 
@@ -50,5 +45,3 @@ public:
 private:
     double quantile_;
 };
-
-#endif // BOOSTING_LOSS_QUANTILELOSS_HPP

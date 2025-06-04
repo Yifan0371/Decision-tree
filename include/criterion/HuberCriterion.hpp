@@ -1,5 +1,4 @@
-#ifndef HUBER_CRITERION_HPP
-#define HUBER_CRITERION_HPP
+#pragma once
 
 #include "tree/ISplitCriterion.hpp"
 
@@ -11,5 +10,3 @@ public:
 private:
     double delta_;
 };
-
-#endif

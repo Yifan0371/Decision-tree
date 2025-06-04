@@ -1,5 +1,4 @@
-#ifndef FUNCTIONS_IO_HPP
-#define FUNCTIONS_IO_HPP
+#pragma once
 
 #include <vector>
 #include <string>
@@ -13,5 +12,3 @@ public:
     void writeResults(const std::vector<double>& results,
                       const std::string& filename);
 };
-
-#endif // FUNCTIONS_IO_HPP

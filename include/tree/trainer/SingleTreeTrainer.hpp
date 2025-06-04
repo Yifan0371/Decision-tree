@@ -1,6 +1,4 @@
-// include/tree/trainer/SingleTreeTrainer.hpp - OpenMP并行版本
-#ifndef TREE_SINGLE_TRAINER_HPP
-#define TREE_SINGLE_TRAINER_HPP
+#pragma once
 
 #include "../ITreeTrainer.hpp"
 #include "../ISplitFinder.hpp"
@@ -33,7 +31,7 @@ public:
                   double& mae) override;
 
 private:
-    // 原有方法（保持API兼容性）
+    
     void splitNode(Node* node,
                    const std::vector<double>& data,
                    int rowLength,
@@ -48,7 +46,7 @@ private:
                           std::vector<int>& indices,
                           int depth);
 
-    // 智能并行版本（根据数据大小自动选择策略）
+    
     void splitNodeInPlaceParallel(Node* node,
                                   const std::vector<double>& data,
                                   int rowLength,
@@ -67,5 +65,3 @@ private:
     std::unique_ptr<ISplitCriterion> criterion_;
     std::unique_ptr<IPruner>         pruner_;
 };
-
-#endif // TREE_SINGLE_TRAINER_HPP

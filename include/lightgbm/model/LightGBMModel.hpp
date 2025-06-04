@@ -1,11 +1,10 @@
-#ifndef LIGHTGBM_MODEL_LIGHTGBMMODEL_HPP
-#define LIGHTGBM_MODEL_LIGHTGBMMODEL_HPP
+#pragma once
 
 #include "tree/Node.hpp"
 #include <vector>
 #include <memory>
 
-/** LightGBM模型 */
+
 class LightGBMModel {
 public:
     struct LGBTree {
@@ -58,7 +57,7 @@ public:
         baseScore_ = 0.0;
     }
 
-    // 新增：特征重要性接口（当前返回全零向量，可根据需要后续实现真正逻辑）
+    
     std::vector<double> getFeatureImportance(int numFeatures) const {
         if (numFeatures <= 0) {
             return std::vector<double>();
@@ -70,7 +69,7 @@ private:
     std::vector<LGBTree> trees_;
     double baseScore_;
 
-    inline double predictSingleTree(const Node* tree, const double* sample, int /* rowLength */) const {
+    inline double predictSingleTree(const Node* tree, const double* sample, int ) const {
         const Node* cur = tree;
         while (cur && !cur->isLeaf) {
             double value = sample[cur->getFeatureIndex()];
@@ -79,5 +78,3 @@ private:
         return cur ? cur->getPrediction() : 0.0;
     }
 };
-
-#endif // LIGHTGBM_MODEL_LIGHTGBMMODEL_HPP

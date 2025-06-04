@@ -1,5 +1,5 @@
-#ifndef QUARTILE_SPLIT_FINDER_HPP
-#define QUARTILE_SPLIT_FINDER_HPP
+#pragma once
+
 #include "tree/ISplitFinder.hpp"
 
 class QuartileSplitFinder : public ISplitFinder {
@@ -12,4 +12,3 @@ public:
         double parentMetric,
         const ISplitCriterion& criterion) const override;
 };
-#endif

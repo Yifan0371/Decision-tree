@@ -2,8 +2,7 @@
 // include/lightgbm/trainer/LightGBMTrainer.hpp
 // 深度 OpenMP 并行优化版本（阈值提高、成员变量预分配）
 // =============================================================================
-#ifndef LIGHTGBM_TRAINER_LIGHTGBMTRAINER_HPP
-#define LIGHTGBM_TRAINER_LIGHTGBMTRAINER_HPP
+#pragma once
 
 #include "lightgbm/core/LightGBMConfig.hpp"
 #include "lightgbm/model/LightGBMModel.hpp"
@@ -86,4 +85,3 @@ private:
                              int rowLength) const;
 };
 
-#endif // LIGHTGBM_TRAINER_LIGHTGBMTRAINER_HPP

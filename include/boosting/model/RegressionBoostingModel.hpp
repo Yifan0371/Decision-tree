@@ -1,18 +1,10 @@
-
-// =============================================================================
-// include/boosting/model/RegressionBoostingModel.hpp
-// =============================================================================
-#ifndef BOOSTING_MODEL_REGRESSIONBOOSTINGMODEL_HPP
-#define BOOSTING_MODEL_REGRESSIONBOOSTINGMODEL_HPP
+#pragma once
 
 #include "tree/Node.hpp"
 #include <vector>
 #include <memory>
 
-/**
- * 回归Boosting模型：高效管理多棵回归树
- * 专门为连续值预测优化
- */
+
 class RegressionBoostingModel {
 public:
     struct RegressionTree {
@@ -23,7 +15,7 @@ public:
         RegressionTree(std::unique_ptr<Node> t, double w, double lr)
             : tree(std::move(t)), weight(w), learningRate(lr) {}
         
-        // 移动语义
+        
         RegressionTree(RegressionTree&& other) noexcept
             : tree(std::move(other.tree)), weight(other.weight), learningRate(other.learningRate) {}
         
@@ -38,15 +30,15 @@ public:
     };
     
     RegressionBoostingModel() : baseScore_(0.0) {
-        trees_.reserve(100);  // 预分配内存
+        trees_.reserve(100);  
     }
     
-    /** 添加新的回归树到模型中 */
+    
     void addTree(std::unique_ptr<Node> tree, double weight = 1.0, double learningRate = 1.0) {
         trees_.emplace_back(std::move(tree), weight, learningRate);
     }
     
-    /** 单样本回归预测 */
+    
     double predict(const double* sample, int rowLength) const {
         double prediction = baseScore_;
         for (const auto& regTree : trees_) {
@@ -56,12 +48,12 @@ public:
         return prediction;
     }
     
-    /** 批量回归预测（向量化优化） */
+    
     std::vector<double> predictBatch(const std::vector<double>& X, int rowLength) const {
         size_t n = X.size() / rowLength;
         std::vector<double> predictions(n, baseScore_);
         
-        // 按树遍历，提高缓存效率
+        
         for (const auto& regTree : trees_) {
             double factor = regTree.learningRate * regTree.weight;
             for (size_t i = 0; i < n; ++i) {
@@ -73,14 +65,14 @@ public:
         return predictions;
     }
     
-    /** 获取树的数量 */
+    
     size_t getTreeCount() const { return trees_.size(); }
     
-    /** 设置基准分数（通常是训练集标签的均值） */
+    
     void setBaseScore(double score) { baseScore_ = score; }
     double getBaseScore() const { return baseScore_; }
     
-    /** 获取回归模型统计信息 */
+    
     void getModelStats(int& totalDepth, int& totalLeaves, size_t& memoryUsage) const {
         totalDepth = 0;
         totalLeaves = 0;
@@ -94,17 +86,17 @@ public:
             memoryUsage += estimateTreeMemory(regTree.tree.get());
         }
     }
-    /** 获取树列表的引用（用于DART权重更新） */
+    
     const std::vector<RegressionTree>& getTrees() const { return trees_; }
     std::vector<RegressionTree>& getTrees() { return trees_; }
-    /** 获取特征重要性（基于分割次数和样本权重） */
+    
     std::vector<double> getFeatureImportance(int numFeatures) const {
         std::vector<double> importance(numFeatures, 0.0);
         for (const auto& regTree : trees_) {
             addTreeImportance(regTree.tree.get(), importance);
         }
         
-        // 归一化
+        
         double total = 0.0;
         for (double imp : importance) total += imp;
         if (total > 0) {
@@ -114,7 +106,7 @@ public:
         return importance;
     }
     
-    /** 清空模型 */
+    
     void clear() {
         trees_.clear();
         trees_.shrink_to_fit();
@@ -125,8 +117,8 @@ private:
     std::vector<RegressionTree> trees_;
     double baseScore_;
     
-   /** 单棵回归树预测 */
-    inline double predictSingleTree(const Node* tree, const double* sample, int /* rowLength */) const {
+   
+    inline double predictSingleTree(const Node* tree, const double* sample, int ) const {
         const Node* cur = tree;
         while (cur && !cur->isLeaf) {
             double value = sample[cur->getFeatureIndex()];
@@ -135,7 +127,7 @@ private:
         return cur ? cur->getPrediction() : 0.0;
     }
     
-    /** 计算树统计信息 */
+    
     void calculateTreeStats(const Node* node, int currentDepth, 
                            int& maxDepth, int& leafCount) const {
         if (!node) return;
@@ -150,7 +142,7 @@ private:
         }
     }
     
-    /** 估算树内存使用 */
+    
     size_t estimateTreeMemory(const Node* node) const {
         if (!node) return 0;
         size_t size = sizeof(Node);
@@ -161,13 +153,13 @@ private:
         return size;
     }
     
-    /** 累积特征重要性 */
+    
     void addTreeImportance(const Node* node, std::vector<double>& importance) const {
         if (!node || node->isLeaf) return;
         
         int feature = node->getFeatureIndex();
         if (feature >= 0 && feature < static_cast<int>(importance.size())) {
-            // 使用样本数作为重要性权重
+            
             importance[feature] += node->samples;
         }
         
@@ -175,5 +167,3 @@ private:
         addTreeImportance(node->getRight(), importance);
     }
 };
-
-#endif // BOOSTING_MODEL_REGRESSIONBOOSTINGMODEL_HPP

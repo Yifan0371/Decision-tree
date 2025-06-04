@@ -1,5 +1,4 @@
-#ifndef MSE_CRITERION_HPP
-#define MSE_CRITERION_HPP
+#pragma once
 
 #include "../tree/ISplitCriterion.hpp"
 
@@ -8,5 +7,3 @@ public:
     double nodeMetric(const std::vector<double>& labels,
                       const std::vector<int>& indices) const override;
 };
-
-#endif // MSE_CRITERION_HPP

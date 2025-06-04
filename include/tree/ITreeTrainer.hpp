@@ -1,5 +1,4 @@
-#ifndef TREE_ITREETRAINER_HPP
-#define TREE_ITREETRAINER_HPP
+#pragma once
 
 #include <vector>
 #include "Node.hpp"
@@ -26,5 +25,3 @@ public:
 protected:
     std::unique_ptr<Node> root_;
 };
-
-#endif // TREE_ITREETRAINER_HPP

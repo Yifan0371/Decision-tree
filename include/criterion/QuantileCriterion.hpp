@@ -1,5 +1,4 @@
-#ifndef QUANTILE_CRITERION_HPP
-#define QUANTILE_CRITERION_HPP
+#pragma once
 
 #include "tree/ISplitCriterion.hpp"
 
@@ -9,7 +8,5 @@ public:
     double nodeMetric(const std::vector<double>& labels,
                       const std::vector<int>&   idx) const override;
 private:
-    double tau_;          // 0 < τ < 1
+    double tau_;          
 };
-
-#endif

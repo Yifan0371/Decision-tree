@@ -1,22 +1,15 @@
-// =============================================================================
-// include/boosting/dart/UniformDartStrategy.hpp
-// =============================================================================
-#ifndef BOOSTING_DART_UNIFORMDARTSTRATEGY_HPP
-#define BOOSTING_DART_UNIFORMDARTSTRATEGY_HPP
+#pragma once
 
 #include "IDartStrategy.hpp"
 #include <unordered_set>
 
 enum class DartWeightStrategy {
-    NONE,           // 不做权重调整
-    MILD,           // 温和调整
-    ORIGINAL,       // 原始DART论文方法
-    EXPERIMENTAL    // 实验性方法
+    NONE,           
+    MILD,           
+    ORIGINAL,       
+    EXPERIMENTAL    
 };
-/**
- * 均匀DART策略：每棵树以相同概率被丢弃
- * 这是最常用的DART实现方式
- */
+
 
 class UniformDartStrategy : public IDartStrategy {
 public:
@@ -45,7 +38,7 @@ public:
     
     std::string name() const override { return "uniform_dart"; }
     
-    // 配置选项
+    
     void setNormalizeWeights(bool normalize) { normalizeWeights_ = normalize; }
     void setSkipDropForPrediction(bool skip) { skipDropForPrediction_ = skip; }
 
@@ -58,8 +51,6 @@ private:
                                   const std::vector<int>& droppedIndices,
                                   int newTreeIndex,
                                   double learningRate) const;
-    /** 检查树索引是否在丢弃列表中 */
+    
     bool isTreeDropped(int treeIndex, const std::vector<int>& droppedIndices) const;
 };
-
-#endif // BOOSTING_DART_UNIFORMDARTSTRATEGY_HPP

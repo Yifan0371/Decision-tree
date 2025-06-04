@@ -128,8 +128,8 @@ endif()
 # =============================================================================
 
 # 安装可执行文件
-install(TARGETS DecisionTreeMain RegressionBoostingMain XGBoostMain LightGBMMain
-        RUNTIME DESTINATION bin)
+#install(TARGETS DecisionTreeMain RegressionBoostingMain XGBoostMain LightGBMMain
+#        RUNTIME DESTINATION bin)
 
 # 安装库文件
 install(TARGETS DecisionTree_lib RegressionBoosting_lib XGBoost_lib LightGBM_lib
@@ -171,3 +171,9 @@ add_custom_target(parallel-info
     COMMAND ${CMAKE_COMMAND} -E echo "Set OMP_NUM_THREADS environment variable to control thread count"
     COMMAND ${CMAKE_COMMAND} -E echo "================================="
 )
+# =================================================================
+# Main可执行文件
+# =================================================================
+
+# 添加main子目录
+add_subdirectory(main)

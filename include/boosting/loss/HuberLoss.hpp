@@ -1,14 +1,9 @@
-
-// =============================================================================
-// include/boosting/loss/HuberLoss.hpp
-// =============================================================================
-#ifndef BOOSTING_LOSS_HUBERLOSS_HPP
-#define BOOSTING_LOSS_HUBERLOSS_HPP
+#pragma once
 
 #include "IRegressionLoss.hpp"
 #include <cmath>
 
-/** Huber损失函数：对离群点鲁棒的回归损失函数 */
+
 class HuberLoss : public IRegressionLoss {
 public:
     explicit HuberLoss(double delta = 1.0) : delta_(delta) {}
@@ -25,9 +20,9 @@ public:
     double gradient(double y_true, double y_pred) const override {
         double r = y_true - y_pred;
         if (std::abs(r) <= delta_) {
-            return r;  // 在δ范围内，梯度就是残差
+            return r;  
         } else {
-            return r > 0 ? delta_ : -delta_;  // 超出δ范围，梯度被裁剪
+            return r > 0 ? delta_ : -delta_;  
         }
     }
     
@@ -44,5 +39,3 @@ public:
 private:
     double delta_;
 };
-
-#endif // BOOSTING_LOSS_HUBERLOSS_HPP

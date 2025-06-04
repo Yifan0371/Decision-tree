@@ -1,11 +1,11 @@
-#ifndef ADAPTIVE_EW_FINDER_HPP
-#define ADAPTIVE_EW_FINDER_HPP
+#pragma once
+
 #include "tree/ISplitFinder.hpp"
-#include <string>  // 添加这个头文件
+#include <string>  
 
 class AdaptiveEWFinder : public ISplitFinder {
 public:
-    // 修复构造函数默认参数
+    
     explicit AdaptiveEWFinder(int minBins = 8, int maxBins = 128, 
                              const std::string& rule = std::string("sturges"))
         : minBins_(minBins), maxBins_(maxBins), rule_(rule) {}
@@ -21,10 +21,9 @@ public:
 private:
     int minBins_;
     int maxBins_;
-    std::string rule_; // "sturges", "rice", "freedman_diaconis", "sqrt"
+    std::string rule_; 
     
-    // 计算自适应箱数
+    
     int calculateOptimalBins(const std::vector<double>& values) const;
     double calculateIQR(std::vector<double> values) const;
 };
-#endif

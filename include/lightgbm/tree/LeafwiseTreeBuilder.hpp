@@ -2,8 +2,7 @@
 // include/lightgbm/tree/LeafwiseTreeBuilder.hpp
 // 深度 OpenMP 并行优化版本（减少锁竞争、提高阈值、预分配缓冲）
 // =============================================================================
-#ifndef LIGHTGBM_TREE_LEAFWISETREEBUILDER_HPP
-#define LIGHTGBM_TREE_LEAFWISETREEBUILDER_HPP
+#pragma once
 
 #include "tree/Node.hpp"
 #include "tree/ISplitFinder.hpp"
@@ -122,4 +121,3 @@ private:
                                         const std::vector<double>& sampleWeights);
 };
 
-#endif // LIGHTGBM_TREE_LEAFWISETREEBUILDER_HPP

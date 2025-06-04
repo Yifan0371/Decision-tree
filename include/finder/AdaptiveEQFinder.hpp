@@ -1,5 +1,5 @@
-#ifndef ADAPTIVE_EQ_FINDER_HPP
-#define ADAPTIVE_EQ_FINDER_HPP
+#pragma once
+
 #include "tree/ISplitFinder.hpp"
 
 class AdaptiveEQFinder : public ISplitFinder {
@@ -22,10 +22,9 @@ private:
     int maxBins_;
     double variabilityThreshold_;
     
-    // 计算最优等频分箱参数
+    
     std::pair<int, int> calculateOptimalFrequencyParams(
         const std::vector<double>& values) const;
     
     double calculateVariability(const std::vector<double>& values) const;
 };
-#endif

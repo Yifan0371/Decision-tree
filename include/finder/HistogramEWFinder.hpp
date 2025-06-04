@@ -1,5 +1,5 @@
-#ifndef HISTOGRAM_EW_FINDER_HPP
-#define HISTOGRAM_EW_FINDER_HPP
+#pragma once
+
 #include "tree/ISplitFinder.hpp"
 
 class HistogramEWFinder : public ISplitFinder {
@@ -15,4 +15,3 @@ public:
 private:
     int bins_;
 };
-#endif

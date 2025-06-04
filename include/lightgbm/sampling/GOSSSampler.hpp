@@ -2,8 +2,7 @@
 // include/lightgbm/sampling/GOSSSampler.hpp
 // 深度 OpenMP 并行优化版本（阈值调整、减少重复分配、并行排序条件限定）
 // =============================================================================
-#ifndef LIGHTGBM_SAMPLING_GOSSSAMPLER_HPP
-#define LIGHTGBM_SAMPLING_GOSSSAMPLER_HPP
+#pragma once
 
 #include <vector>
 #include <random>
@@ -100,4 +99,4 @@ private:
     }
 };
 
-#endif // LIGHTGBM_SAMPLING_GOSSSAMPLER_HPP
+
