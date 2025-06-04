@@ -1,0 +1,30 @@
+===============================================
+GBRT Strong Scaling Performance Test Log
+运行时间: 2025年 06月 04日 星期三 02:38:50 CEST
+项目根: /home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree
+===============================================
+PROJECT_ROOT=/home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree
+物理核心数 (排除超线程)：4，已设置 OMP_NUM_THREADS=4
+===============================================
+    GBRT Strong Scaling Performance Test    
+===============================================
+Fixed Parameters:
+  Loss: squared | Iterations: 30
+  Learning Rate: 0.1 | Max Depth: 4
+  Min Leaf: 1 | Criterion: mse
+  Split Method: exhaustive | Subsample: 1.0
+  Data: cleaned_data.csv
+
+Threads | Elapsed(ms) | TestMSE    | TrainTime  | Trees/sec
+--------|-------------|------------|------------|----------
+      1 |        1138 | 0.000234   | 1083ms     | 26.36
+      2 |        1106 | 0.000234   | 1072ms     | 27.12
+      4 |         782 | 0.000234   | 738ms      | 38.36
+
+===============================================
+Strong Scaling Analysis:
+- 理想: 线性加速，时间反比于线程数
+- 关注点: TestMSE 保持稳定，Elapsed 时间下降
+- 效率 = (串行时间 / 并行时间) / 线程数
+- GBRT特点: 树构建具有数据依赖性，并行效果有限
+===============================================

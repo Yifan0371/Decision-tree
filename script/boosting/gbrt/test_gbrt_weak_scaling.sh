@@ -1,0 +1,149 @@
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================================
+# script/boosting/gbrt/test_gbrt_weak_scaling.sh
+# GBRT Weak-scaling test（自动按行截取同一大文件）– 对同一份数据，
+# 截取不同大小子集，按线程数测试耗时和 MSE
+# ==============================================================================
+
+# 1) 定位项目根目录和可执行
+PROJECT_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd )"
+SCRIPT_DIR="$PROJECT_ROOT/script/boosting/gbrt"
+mkdir -p "$SCRIPT_DIR"
+
+# 定义并创建日志文件（用时间戳区分每次运行）
+LOGFILE="$SCRIPT_DIR/gbrt_weak_scaling_$(date +%Y%m%d_%H%M%S).log"
+echo "日志文件: $LOGFILE"
+echo "===============================================" >> "$LOGFILE"
+echo "GBRT Weak Scaling Performance Test Log" >> "$LOGFILE"
+echo "运行时间: $(date)" >> "$LOGFILE"
+echo "项目根: $PROJECT_ROOT" >> "$LOGFILE"
+echo "===============================================" >> "$LOGFILE"
+
+# 将后续所有输出同时写入终端和日志文件
+exec > >(tee -a "$LOGFILE") 2>&1
+
+echo "PROJECT_ROOT=$PROJECT_ROOT"
+EXECUTABLE="$PROJECT_ROOT/build/RegressionBoostingMain"
+
+# 2) source env_config.sh：自动设置 OMP_NUM_THREADS，并在必要时编译可执行
+source "$PROJECT_ROOT/script/env_config.sh"
+MAX_CORES=$OMP_NUM_THREADS
+
+# 3) 固定使用的原始数据文件：cleaned_data.csv
+DATA="$PROJECT_ROOT/data/data_clean/cleaned_data.csv"
+LOSS="squared"
+NUM_ITERATIONS=30
+LEARNING_RATE=0.1
+MAX_DEPTH=4
+MIN_LEAF=1
+CRITERION="mse"
+SPLIT_METHOD="exhaustive"
+SUBSAMPLE=1.0
+
+# 4) 确认可执行和数据都存在
+[[ -f "$EXECUTABLE" ]] || { echo " $EXECUTABLE 不存在"; exit 1; }
+[[ -f "$DATA"       ]] || { echo " $DATA 不存在"; exit 1; }
+
+# 5) 计算原始数据的总行数（不含 header）和基准行数 BASE
+total_rows=$(( $(wc -l < "$DATA") - 1 ))
+if (( total_rows < MAX_CORES )); then
+    echo "警告：数据行数 ($total_rows) 小于物理核数 ($MAX_CORES)，脚本退出"
+    exit 1
+fi
+BASE=$(( total_rows / MAX_CORES ))
+echo "总行数 (不含 header): $total_rows，物理核数: $MAX_CORES，基准行数 BASE=$BASE"
+
+# 6) 生成线程列表：1, 2, 4, …, MAX_CORES。如果最后一个不是 MAX_CORES 则再加上
+threads=(1)
+while (( threads[-1] * 2 <= MAX_CORES )); do
+    threads+=( $(( threads[-1] * 2 )) )
+done
+(( threads[-1] != MAX_CORES )) && threads+=( $MAX_CORES )
+
+# 7) 打印结果表头
+echo "==============================================="
+echo "    GBRT Weak Scaling Performance Test     "
+echo "==============================================="
+echo "Fixed Parameters (per thread):"
+echo "  Loss: $LOSS | Iterations: $NUM_ITERATIONS"
+echo "  Learning Rate: $LEARNING_RATE | Max Depth: $MAX_DEPTH"
+echo "  Min Leaf: $MIN_LEAF | Criterion: $CRITERION"
+echo "  Split Method: $SPLIT_METHOD | Subsample: $SUBSAMPLE"
+echo "  Base rows per thread: $BASE"
+echo ""
+echo "Threads | SubsetRows | Elapsed(ms) | TestMSE    | TrainTime  | Efficiency"
+echo "--------|------------|-------------|------------|------------|----------"
+
+# 记录单线程时间作为基准
+baseline_time=0
+
+# 8) 对于每个线程数 t：
+for t in "${threads[@]}"; do
+    export OMP_NUM_THREADS=$t
+
+    # 8.1) 计算本次需截取的样本行数 chunk_size = t * BASE
+    chunk_size=$(( t * BASE ))
+    # 如果 chunk_size 超过了 total_rows，就直接取全部
+    if (( chunk_size > total_rows )); then
+        chunk_size=$total_rows
+    fi
+    # head 需要截取的行数 = 表头1行 + chunk_size行
+    lines_to_take=$(( chunk_size + 1 ))
+
+    # 8.2) 生成一个临时文件 tmpfile，内容为 header + 前 lines_to_take-1 条样本
+    tmpfile="$PROJECT_ROOT/data/data_clean/tmp_gbrt_chunk_t${t}.csv"
+    head -n "$lines_to_take" "$DATA" > "$tmpfile"
+
+    # 8.3) 开始计时
+    start_ts=$(date +%s%3N)
+
+    # 8.4) 运行 GBRT，并捕获完整 stdout
+    output=$("$EXECUTABLE" "$tmpfile" \
+        "$LOSS" $NUM_ITERATIONS $LEARNING_RATE $MAX_DEPTH $MIN_LEAF \
+        "$CRITERION" "$SPLIT_METHOD" $SUBSAMPLE 2>/dev/null)
+
+    # 8.5) 结束计时
+    end_ts=$(date +%s%3N)
+    elapsed=$(( end_ts - start_ts ))
+
+    # 8.6) 提取关键指标
+    test_mse=$(echo "$output" | grep "Test MSE:" | sed -n 's/.*Test MSE: \([0-9.-]*\).*/\1/p' | tail -1)
+    train_time=$(echo "$output" | grep "Train Time:" | sed -n 's/.*Train Time: \([0-9]*\)ms.*/\1/p' | tail -1)
+
+    # 处理空值
+    [[ -z "$test_mse" ]] && test_mse="ERROR"
+    [[ -z "$train_time" ]] && train_time="0"
+
+    # 8.7) 计算效率 (相对于理想 weak scaling 的效率)
+    if (( t == 1 )); then
+        baseline_time=$elapsed
+        efficiency="1.00"
+    else
+        if (( elapsed > 0 )); then
+            efficiency=$(echo "scale=2; $baseline_time / $elapsed" | bc -l 2>/dev/null || echo "N/A")
+        else
+            efficiency="N/A"
+        fi
+    fi
+
+    # 8.8) 打印并记录本次结果行
+    printf "%7d | %10d | %11d | %-10s | %-10s | %s\n" \
+           "$t" "$chunk_size" "$elapsed" "$test_mse" "${train_time}ms" "$efficiency"
+
+    # 8.9) 删除临时文件
+    rm -f "$tmpfile"
+done
+
+echo ""
+echo "==============================================="
+echo "Weak Scaling Analysis:"
+echo "- 理想: 随着线程数增加，处理更多数据但时间保持恒定"
+echo "- 效率 = 单线程时间 / 当前时间"
+echo "- 关注点: 效率接近1.0表示良好的 weak scaling"
+echo "- 数据量按线程数线性增长，计算复杂度也线性增长"
+echo "- GBRT特点: 顺序树构建限制了weak scaling效果"
+echo "==============================================="
+
+exit 0

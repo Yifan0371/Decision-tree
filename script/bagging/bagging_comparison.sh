@@ -1,8 +1,47 @@
 #!/bin/bash
+set -euo pipefail
 
-# Bagging Performance Comparison Script
-# Comparing Exhaustive vs Random Split Finders
-# Configuration: MSE criterion, No pruning
+# =============================================================================
+# script/bagging/test_bagging_performance_comparison.sh
+#
+# 比较 Exhaustive vs Random Split Finders 在 Bagging 模块下的性能差异
+# =============================================================================
+
+# 1) 项目根路径 & 设置线程数
+PROJECT_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd )"
+source "$PROJECT_ROOT/script/env_config.sh"
+
+EXECUTABLE="$PROJECT_ROOT/build/DecisionTreeMain"
+if [[ ! -x "$EXECUTABLE" ]]; then
+  echo "ERROR: 找不到可执行 $EXECUTABLE，请先编译"
+  exit 1
+fi
+
+# 2) 数据路径 & 输出文件
+DATA_PATH="$PROJECT_ROOT/data/data_clean/cleaned_data.csv"
+if [[ ! -f "$DATA_PATH" ]]; then
+  echo "ERROR: 找不到数据文件 $DATA_PATH"
+  exit 1
+fi
+
+RESULTS_DIR="$PROJECT_ROOT/script/bagging"
+mkdir -p "$RESULTS_DIR"
+
+EXHAUSTIVE_RESULTS="$RESULTS_DIR/exhaustive_results.txt"
+RANDOM_RESULTS="$RESULTS_DIR/random_results.txt"
+
+# 清空旧结果并写入表头
+{
+  echo "# Exhaustive Finder Results - $(date)"
+  echo "Trees,Train_Time(ms),Test_MSE,Test_MAE,OOB_MSE"
+} > "$EXHAUSTIVE_RESULTS"
+
+{
+  echo "# Random Finder Results - $(date)"
+  echo "Trees,Train_Time(ms),Test_MSE,Test_MAE,OOB_MSE"
+} > "$RANDOM_RESULTS"
+
+TREE_COUNTS=(5 10 20 50 100)
 
 echo "=========================================="
 echo "Bagging Performance Comparison"
@@ -11,122 +50,80 @@ echo "Comparing: Exhaustive vs Random Finders"
 echo "Configuration: MSE criterion, No pruner"
 echo "Date: $(date)"
 echo ""
-
-# Create results directory
-RESULTS_DIR="script/bagging"
-mkdir -p $RESULTS_DIR
-
-# Result files
-EXHAUSTIVE_RESULTS="$RESULTS_DIR/exhaustive_results.txt"
-RANDOM_RESULTS="$RESULTS_DIR/random_results.txt"
-
-# Clear previous results
-> $EXHAUSTIVE_RESULTS
-> $RANDOM_RESULTS
-
-# Write file headers
-echo "# Exhaustive Finder Results - $(date)" > $EXHAUSTIVE_RESULTS
-echo "# Format: Trees, Train_Time(ms), Test_MSE, Test_MAE, OOB_MSE" >> $EXHAUSTIVE_RESULTS
-echo "Trees,Train_Time,Test_MSE,Test_MAE,OOB_MSE" >> $EXHAUSTIVE_RESULTS
-
-echo "# Random Finder Results - $(date)" > $RANDOM_RESULTS
-echo "# Format: Trees, Train_Time(ms), Test_MSE, Test_MAE, OOB_MSE" >> $RANDOM_RESULTS
-echo "Trees,Train_Time,Test_MSE,Test_MAE,OOB_MSE" >> $RANDOM_RESULTS
-
-# Test configurations
-TREE_COUNTS=(5 10 20 50 100)
-DATA_PATH="data/data_clean/cleaned_data.csv"
-EXECUTABLE="build/DecisionTreeMain"
-
-# Check executable exists
-if [ ! -f "$EXECUTABLE" ]; then
-    echo "ERROR: $EXECUTABLE not found!"
-    echo "Please run 'make' in the build directory first."
-    exit 1
-fi
-
-# Check data file exists
-if [ ! -f "$DATA_PATH" ]; then
-    echo "ERROR: Data file $DATA_PATH not found!"
-    exit 1
-fi
-
-echo "Testing configurations:"
-echo "Tree counts: ${TREE_COUNTS[*]}"
+echo "Testing configurations: Trees = ${TREE_COUNTS[*]}"
 echo "Data: $DATA_PATH"
 echo "Timeout: 300 seconds per test"
 echo ""
 
-# Function to extract results
+# 提取结果的辅助函数
 extract_results() {
-    local log_file=$1
-    local train_time=$(grep "Train Time:" $log_file | awk '{print $3}' | sed 's/ms//')
-    local test_mse=$(grep "Test MSE:" $log_file | awk '{print $3}')
-    local test_mae=$(grep "Test MAE:" $log_file | awk '{print $6}')
-    local oob_mse=$(grep "OOB MSE:" $log_file | awk '{print $3}')
-    
-    echo "$train_time,$test_mse,$test_mae,$oob_mse"
+  local log_file="$1"
+  local train_time test_mse test_mae oob_mse
+  train_time=$(grep -E "Train Time:" "$log_file" | awk '{print $3}' | sed 's/ms//g')
+  test_mse=$(grep -E "Test MSE:" "$log_file" | awk '{print $3}')
+  test_mae=$(grep -E "Test MAE:" "$log_file" | awk '{print $6}')
+  oob_mse=$(grep -E "OOB MSE:" "$log_file" | awk '{print $3}')
+  echo "$train_time,$test_mse,$test_mae,$oob_mse"
 }
 
-# Main test loop
 for trees in "${TREE_COUNTS[@]}"; do
-    echo "Testing with $trees trees..."
-    
-    # Test Exhaustive Finder
-    echo "  Running Exhaustive finder..."
-    temp_log="temp_exhaustive_${trees}.log"
-    
-    timeout 300 $EXECUTABLE bagging $DATA_PATH $trees 1.0 30 2 mse exhaustive none 0.01 42 > $temp_log 2>&1
-    
-    if [ $? -eq 0 ]; then
-        results=$(extract_results $temp_log)
-        echo "$trees,$results" >> $EXHAUSTIVE_RESULTS
-        echo "    Exhaustive completed: $results"
-    else
-        echo "    Exhaustive failed or timeout"
-        echo "$trees,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT" >> $EXHAUSTIVE_RESULTS
-    fi
-    
-    # Test Random Finder
-    echo "  Running Random finder..."
-    temp_log="temp_random_${trees}.log"
-    
-    timeout 300 $EXECUTABLE bagging $DATA_PATH $trees 1.0 30 2 mse random none 0.01 42 > $temp_log 2>&1
-    
-    if [ $? -eq 0 ]; then
-        results=$(extract_results $temp_log)
-        echo "$trees,$results" >> $RANDOM_RESULTS
-        echo "    Random completed: $results"
-    else
-        echo "    Random failed or timeout"
-        echo "$trees,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT" >> $RANDOM_RESULTS
-    fi
-    
-    # Clean temporary files
-    rm -f temp_exhaustive_${trees}.log temp_random_${trees}.log
-    
-    echo "  Completed $trees trees test"
-    echo ""
+  echo "Testing with $trees trees..."
+
+  # Exhaustive
+  echo "  Running Exhaustive finder..."
+  temp_ex="temp_exhaustive_${trees}.log"
+  timeout 300 "$EXECUTABLE" bagging "$DATA_PATH" \
+    "$trees" 1.0 30 2 mse exhaustive none 0.01 42 \
+    > "$temp_ex" 2>&1
+
+  if [[ $? -eq 0 ]]; then
+    results=$(extract_results "$temp_ex")
+    echo "$trees,$results" >> "$EXHAUSTIVE_RESULTS"
+    echo "    Exhaustive completed: $results"
+  else
+    echo "    Exhaustive failed或超时"
+    echo "$trees,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT" >> "$EXHAUSTIVE_RESULTS"
+  fi
+  rm -f "$temp_ex"
+
+  # Random
+  echo "  Running Random finder..."
+  temp_rnd="temp_random_${trees}.log"
+  timeout 300 "$EXECUTABLE" bagging "$DATA_PATH" \
+    "$trees" 1.0 30 2 mse random none 0.01 42 \
+    > "$temp_rnd" 2>&1
+
+  if [[ $? -eq 0 ]]; then
+    results=$(extract_results "$temp_rnd")
+    echo "$trees,$results" >> "$RANDOM_RESULTS"
+    echo "    Random completed: $results"
+  else
+    echo "    Random failed或超时"
+    echo "$trees,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT" >> "$RANDOM_RESULTS"
+  fi
+  rm -f "$temp_rnd"
+
+  echo "  Completed $trees trees test"
+  echo ""
 done
 
 echo "=========================================="
 echo "Summary Report"
 echo "=========================================="
-
 echo ""
 echo "Exhaustive Finder Results:"
 echo "Trees | Train_Time | Test_MSE | Test_MAE | OOB_MSE"
 echo "------|------------|----------|----------|--------"
-tail -n +4 $EXHAUSTIVE_RESULTS | while IFS=',' read trees train_time test_mse test_mae oob_mse; do
-    printf "%5s | %10s | %8s | %8s | %7s\n" "$trees" "$train_time" "$test_mse" "$test_mae" "$oob_mse"
+tail -n +3 "$EXHAUSTIVE_RESULTS" | while IFS=',' read -r t tt mse mae oob; do
+  printf "%5s | %10s | %8s | %8s | %7s\n" "$t" "$tt" "$mse" "$mae" "$oob"
 done
 
 echo ""
 echo "Random Finder Results:"
 echo "Trees | Train_Time | Test_MSE | Test_MAE | OOB_MSE"
 echo "------|------------|----------|----------|--------"
-tail -n +4 $RANDOM_RESULTS | while IFS=',' read trees train_time test_mse test_mae oob_mse; do
-    printf "%5s | %10s | %8s | %8s | %7s\n" "$trees" "$train_time" "$test_mse" "$test_mae" "$oob_mse"
+tail -n +3 "$RANDOM_RESULTS" | while IFS=',' read -r t tt mse mae oob; do
+  printf "%5s | %10s | %8s | %8s | %7s\n" "$t" "$tt" "$mse" "$mae" "$oob"
 done
 
 echo ""

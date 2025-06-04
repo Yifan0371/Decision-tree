@@ -1,0 +1,21 @@
+===============================================
+GBRT Weak Scaling Performance Test Log
+运行时间: 2025年 06月 04日 星期三 02:23:00 CEST
+项目根: /home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree
+===============================================
+PROJECT_ROOT=/home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree
+物理核心数 (排除超线程)：4，已设置 OMP_NUM_THREADS=4
+检测到可执行文件：/home/yifan/桌面/CHPS_M1/ppn重启/6-3/Decision-tree/build/DecisionTreeMain
+总行数 (不含 header): 14795，物理核数: 4，基准行数 BASE=3698
+===============================================
+    GBRT Weak Scaling Performance Test     
+===============================================
+Fixed Parameters (per thread):
+  Loss: squared | Iterations: 30
+  Learning Rate: 0.1 | Max Depth: 4
+  Min Leaf: 1 | Criterion: mse
+  Split Method: exhaustive | Subsample: 1.0
+  Base rows per thread: 3698
+
+Threads | SubsetRows | Elapsed(ms) | TestMSE    | TrainTime  | Efficiency
+--------|------------|-------------|------------|------------|----------
