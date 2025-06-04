@@ -12,3 +12,4 @@ add_subdirectory(boosting)  # 回归Boosting模块
 add_subdirectory(xgboost)   # XGBoost 模块
 add_subdirectory(lightgbm)  # LightGBM 模块
 add_subdirectory(app)
+add_subdirectory(histogram)      # **新增**: 预计算直方图优化模块
