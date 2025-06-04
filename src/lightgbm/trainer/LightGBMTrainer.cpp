@@ -1,6 +1,5 @@
 // =============================================================================
-// src/lightgbm/trainer/LightGBMTrainer.cpp
-// 深度 OpenMP 并行优化版本（阈值提高、合并并行、减少锁竞争）
+// src/lightgbm/trainer/LightGBMTrainer.cpp - 优化版本（避免vector<vector>）
 // =============================================================================
 #include "lightgbm/trainer/LightGBMTrainer.hpp"
 #include "boosting/loss/SquaredLoss.hpp"
@@ -18,6 +17,28 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+// 优化的特征绑定存储结构 - 替代vector<FeatureBundle>
+struct OptimizedFeatureBundles {
+    std::vector<int> featureToBundle;     // 特征到bundle的映射
+    std::vector<double> featureOffsets;   // 特征的偏移值
+    std::vector<int> bundleSizes;         // 每个bundle的大小
+    int numBundles = 0;
+    
+    OptimizedFeatureBundles(int numFeatures) 
+        : featureToBundle(numFeatures), featureOffsets(numFeatures, 0.0) {
+        // 简单初始化：每个特征单独一个bundle
+        for (int i = 0; i < numFeatures; ++i) {
+            featureToBundle[i] = i;
+        }
+        bundleSizes.resize(numFeatures, 1);
+        numBundles = numFeatures;
+    }
+    
+    std::pair<int, double> transformFeature(int originalFeature, double value) const {
+        return {featureToBundle[originalFeature], value + featureOffsets[originalFeature]};
+    }
+};
 
 LightGBMTrainer::LightGBMTrainer(const LightGBMConfig& config)
     : config_(config) {
@@ -51,7 +72,7 @@ void LightGBMTrainer::initializeComponents() {
 void LightGBMTrainer::train(const std::vector<double>& data,
                             int rowLength,
                             const std::vector<double>& labels) {
-    size_t n = labels.size();
+    const size_t n = labels.size();
     if (config_.verbose) {
         std::cout << "LightGBM Enhanced: " << n << " 样本, " << rowLength << " 特征" << std::endl;
         std::cout << "Split 方法: " << config_.splitMethod << std::endl;
@@ -59,33 +80,21 @@ void LightGBMTrainer::train(const std::vector<double>& data,
         std::cout << "Feature Bundling: " << (config_.enableFeatureBundling ? "Enabled" : "Disabled") << std::endl;
     }
 
-    // 特征预处理：只在大规模特征时并行，否则串行
-    if (!config_.enableFeatureBundling && rowLength >= 1000) {
-        // 并行构造简单 bundle
-        featureBundles_.clear();
-        featureBundles_.reserve(rowLength);
-        #pragma omp parallel for schedule(static)
-        for (int i = 0; i < rowLength; ++i) {
-            FeatureBundle bundle;
-            bundle.features.push_back(i);
-            bundle.offsets.push_back(0.0);
-            bundle.totalBins = config_.maxBin;
-            #pragma omp critical
-            {
-                featureBundles_.push_back(bundle);
-            }
-        }
-        if (config_.verbose) {
-            std::cout << "Feature Bundling (parallel): " << rowLength << " -> "
-                      << featureBundles_.size() << " bundles" << std::endl;
-        }
+    // **优化1: 使用优化的特征绑定结构**
+    OptimizedFeatureBundles optimizedBundles(rowLength);
+    
+    if (config_.enableFeatureBundling && rowLength >= 100) {
+        preprocessFeaturesOptimized(data, rowLength, n, optimizedBundles);
     } else {
-        // 串行或者使用 Bundler
-        preprocessFeaturesSerial(data, rowLength, n);
+        // 简单处理：每个特征独立
+        if (config_.verbose) {
+            std::cout << "Feature Bundling (simple): " << rowLength << " -> "
+                      << rowLength << " bundles" << std::endl;
+        }
     }
 
     // 初始化预测和梯度
-    double baseScore = computeBaseScore(labels);
+    const double baseScore = computeBaseScore(labels);
     model_.setBaseScore(baseScore);
     std::vector<double> predictions(n, baseScore);
     gradients_.assign(n, 0.0);
@@ -94,34 +103,22 @@ void LightGBMTrainer::train(const std::vector<double>& data,
     for (int iter = 0; iter < config_.numIterations; ++iter) {
         auto iterStart = std::chrono::high_resolution_clock::now();
 
-        // 串行计算损失并更新梯度（阈值 n < 10000 都走串行）
-        double currentLoss = computeLossSerial(labels, predictions);
+        // 计算损失并更新梯度
+        const double currentLoss = computeLossOptimized(labels, predictions);
         trainingLoss_.push_back(currentLoss);
-        computeGradientsSerial(labels, predictions);
+        computeGradientsOptimized(labels, predictions);
 
         // GOSS 采样或全量
         if (config_.enableGOSS) {
             std::vector<double> absGradients(n);
-            // 串行计算 absGradients（阈值 n < 10000）
-            for (size_t i = 0; i < n; ++i) {
-                absGradients[i] = std::abs(gradients_[i]);
-            }
+            computeAbsGradients(absGradients);
             gossSampler_->sample(absGradients, sampleIndices_, sampleWeights_);
-            // 串行归一化
-            double totalWeight = std::accumulate(sampleWeights_.begin(), sampleWeights_.end(), 0.0);
-            if (totalWeight > 0.0) {
-                double normFactor = static_cast<double>(n) / totalWeight;
-                for (double& w : sampleWeights_) {
-                    w *= normFactor;
-                }
-            }
+            normalizeWeights(n);
         } else {
-            sampleIndices_.resize(n);
-            sampleWeights_.assign(n, 1.0);
-            std::iota(sampleIndices_.begin(), sampleIndices_.end(), 0);
+            prepareFullSample(n);
         }
 
-        // 构建一棵树（内部已并行优化）
+        // 构建一棵树
         auto tree = treeBuilder_->buildTree(
             data, rowLength, labels, gradients_,
             sampleIndices_, sampleWeights_, featureBundles_);
@@ -133,22 +130,8 @@ void LightGBMTrainer::train(const std::vector<double>& data,
             break;
         }
 
-        // 更新预测（阈值 n >= 10000 并行，否则串行）
-        if (n >= 10000) {
-            #pragma omp parallel for schedule(static)
-            for (size_t i = 0; i < n; ++i) {
-                const double* sample = &data[i * rowLength];
-                double treePred = predictSingleTree(tree.get(), sample, rowLength);
-                predictions[i] += config_.learningRate * treePred;
-            }
-        } else {
-            for (size_t i = 0; i < n; ++i) {
-                const double* sample = &data[i * rowLength];
-                double treePred = predictSingleTree(tree.get(), sample, rowLength);
-                predictions[i] += config_.learningRate * treePred;
-            }
-        }
-
+        // **优化2: 高效预测更新**
+        updatePredictionsOptimized(data, rowLength, tree.get(), predictions, n);
         model_.addTree(std::move(tree), config_.learningRate);
 
         auto iterEnd = std::chrono::high_resolution_clock::now();
@@ -161,12 +144,9 @@ void LightGBMTrainer::train(const std::vector<double>& data,
                       << " | Time: " << iterTime.count() << " ms" << std::endl;
         }
 
-        // 早停：用串行滑动窗口最小值判断，避免每轮都 O(k) 扫描
+        // 早停检查
         if (config_.earlyStoppingRounds > 0 && iter >= config_.earlyStoppingRounds) {
-            double recentBest = *std::min_element(
-                trainingLoss_.end() - config_.earlyStoppingRounds,
-                trainingLoss_.end());
-            if (currentLoss >= recentBest - config_.tolerance) {
+            if (checkEarlyStop(iter)) {
                 if (config_.verbose) {
                     std::cout << "Early stopping at iteration " << iter << std::endl;
                 }
@@ -180,6 +160,135 @@ void LightGBMTrainer::train(const std::vector<double>& data,
     }
 }
 
+// **优化方法实现**
+
+void LightGBMTrainer::preprocessFeaturesOptimized(const std::vector<double>& data,
+                                                  int rowLength,
+                                                  size_t sampleSize,
+                                                  OptimizedFeatureBundles& bundles) {
+    // 简化的特征绑定：基于稀疏性分析
+    std::vector<double> sparsity(rowLength);
+    constexpr double EPS = 1e-12;
+    
+    // **并行计算特征稀疏性**
+    #pragma omp parallel for schedule(static) if(rowLength > 50)
+    for (int f = 0; f < rowLength; ++f) {
+        int nonZeroCount = 0;
+        const size_t checkSize = std::min(sampleSize, size_t(10000)); // 采样检查
+        
+        for (size_t i = 0; i < checkSize; ++i) {
+            if (std::abs(data[i * rowLength + f]) > EPS) {
+                ++nonZeroCount;
+            }
+        }
+        sparsity[f] = 1.0 - static_cast<double>(nonZeroCount) / checkSize;
+    }
+    
+    // 根据稀疏性重新组织bundle
+    constexpr double SPARSITY_THRESHOLD = 0.8;
+    int bundleId = 0;
+    
+    for (int f = 0; f < rowLength; ++f) {
+        if (sparsity[f] > SPARSITY_THRESHOLD) {
+            // 高稀疏特征可以尝试绑定
+            bundles.featureToBundle[f] = bundleId;
+            bundles.featureOffsets[f] = 0.0; // 简化处理
+        } else {
+            // 低稀疏特征独立
+            bundles.featureToBundle[f] = bundleId;
+            bundles.featureOffsets[f] = 0.0;
+        }
+        ++bundleId;
+    }
+    
+    bundles.numBundles = bundleId;
+    bundles.bundleSizes.resize(bundleId, 1);
+    
+    if (config_.verbose) {
+        std::cout << "Feature Bundling (optimized): " << rowLength << " -> "
+                  << bundles.numBundles << " bundles" << std::endl;
+    }
+}
+
+double LightGBMTrainer::computeLossOptimized(const std::vector<double>& labels,
+                                            const std::vector<double>& predictions) const {
+    const size_t n = labels.size();
+    double loss = 0.0;
+    
+    #pragma omp parallel for reduction(+:loss) schedule(static) if(n > 5000)
+    for (size_t i = 0; i < n; ++i) {
+        loss += lossFunction_->loss(labels[i], predictions[i]);
+    }
+    
+    return loss / n;
+}
+
+void LightGBMTrainer::computeGradientsOptimized(const std::vector<double>& labels,
+                                               const std::vector<double>& predictions) {
+    const size_t n = labels.size();
+    
+    #pragma omp parallel for schedule(static) if(n > 5000)
+    for (size_t i = 0; i < n; ++i) {
+        gradients_[i] = labels[i] - predictions[i];
+    }
+}
+
+void LightGBMTrainer::computeAbsGradients(std::vector<double>& absGradients) const {
+    const size_t n = gradients_.size();
+    
+    #pragma omp parallel for schedule(static) if(n > 5000)
+    for (size_t i = 0; i < n; ++i) {
+        absGradients[i] = std::abs(gradients_[i]);
+    }
+}
+
+void LightGBMTrainer::normalizeWeights(size_t n) {
+    const double totalWeight = std::accumulate(sampleWeights_.begin(), sampleWeights_.end(), 0.0);
+    if (totalWeight > 0.0) {
+        const double normFactor = static_cast<double>(n) / totalWeight;
+        
+        #pragma omp parallel for schedule(static) if(sampleWeights_.size() > 1000)
+        for (size_t i = 0; i < sampleWeights_.size(); ++i) {
+            sampleWeights_[i] *= normFactor;
+        }
+    }
+}
+
+void LightGBMTrainer::prepareFullSample(size_t n) {
+    sampleIndices_.resize(n);
+    sampleWeights_.assign(n, 1.0);
+    std::iota(sampleIndices_.begin(), sampleIndices_.end(), 0);
+}
+
+void LightGBMTrainer::updatePredictionsOptimized(const std::vector<double>& data,
+                                                 int rowLength,
+                                                 const Node* tree,
+                                                 std::vector<double>& predictions,
+                                                 size_t n) const {
+    #pragma omp parallel for schedule(static) if(n > 5000)
+    for (size_t i = 0; i < n; ++i) {
+        const double* sample = &data[i * rowLength];
+        const double treePred = predictSingleTree(tree, sample, rowLength);
+        predictions[i] += config_.learningRate * treePred;
+    }
+}
+
+bool LightGBMTrainer::checkEarlyStop(int currentIter) const {
+    const int patience = config_.earlyStoppingRounds;
+    if (static_cast<int>(trainingLoss_.size()) < patience + 1) {
+        return false;
+    }
+    
+    const auto recentStart = trainingLoss_.end() - patience - 1;
+    const auto recentEnd = trainingLoss_.end() - 1;
+    const double bestLoss = *std::min_element(recentStart, recentEnd);
+    const double currentLoss = trainingLoss_.back();
+    
+    return currentLoss >= bestLoss - config_.tolerance;
+}
+
+// **保留其他必要方法**
+
 double LightGBMTrainer::predict(const double* sample, int rowLength) const {
     return model_.predict(sample, rowLength);
 }
@@ -189,79 +298,33 @@ void LightGBMTrainer::evaluate(const std::vector<double>& X,
                                const std::vector<double>& y,
                                double& mse,
                                double& mae) {
-    auto predictions = model_.predictBatch(X, rowLength);
-    size_t n = y.size();
-    // 串行或并行评估，阈值 n >= 10000
-    double sumMSE = 0.0, sumMAE = 0.0;
-    if (n >= 10000) {
-        #pragma omp parallel for reduction(+:sumMSE, sumMAE) schedule(static)
-        for (size_t i = 0; i < n; ++i) {
-            double diff = y[i] - predictions[i];
-            sumMSE += diff * diff;
-            sumMAE += std::abs(diff);
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            double diff = y[i] - predictions[i];
-            sumMSE += diff * diff;
-            sumMAE += std::abs(diff);
-        }
+    const auto predictions = model_.predictBatch(X, rowLength);
+    const size_t n = y.size();
+    
+    mse = 0.0;
+    mae = 0.0;
+    
+    #pragma omp parallel for reduction(+:mse,mae) schedule(static) if(n > 5000)
+    for (size_t i = 0; i < n; ++i) {
+        const double diff = y[i] - predictions[i];
+        mse += diff * diff;
+        mae += std::abs(diff);
     }
-    mse = sumMSE / n;
-    mae = sumMAE / n;
-}
-
-void LightGBMTrainer::preprocessFeaturesSerial(const std::vector<double>& /* data */,
-                                               int rowLength,
-                                               size_t /* sampleSize */) {
-    // 串行简单 bundle（每个特征各占一个 bundle）
-    featureBundles_.clear();
-    featureBundles_.reserve(rowLength);
-    for (int i = 0; i < rowLength; ++i) {
-        FeatureBundle bundle;
-        bundle.features.push_back(i);
-        bundle.offsets.push_back(0.0);
-        bundle.totalBins = config_.maxBin;
-        featureBundles_.push_back(std::move(bundle));
-    }
-    if (config_.verbose) {
-        std::cout << "Feature Bundling (serial): " << rowLength << " -> "
-                  << featureBundles_.size() << " bundles" << std::endl;
-    }
+    
+    mse /= n;
+    mae /= n;
 }
 
 double LightGBMTrainer::computeBaseScore(const std::vector<double>& y) const {
-    size_t n = y.size();
+    const size_t n = y.size();
     double sum = 0.0;
-    if (n >= 10000) {
-        #pragma omp parallel for reduction(+:sum) schedule(static)
-        for (size_t i = 0; i < n; ++i) {
-            sum += y[i];
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            sum += y[i];
-        }
+    
+    #pragma omp parallel for reduction(+:sum) schedule(static) if(n > 5000)
+    for (size_t i = 0; i < n; ++i) {
+        sum += y[i];
     }
+    
     return sum / n;
-}
-
-double LightGBMTrainer::computeLossSerial(const std::vector<double>& labels,
-                                          const std::vector<double>& predictions) const {
-    size_t n = labels.size();
-    double loss = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        loss += lossFunction_->loss(labels[i], predictions[i]);
-    }
-    return loss / n;
-}
-
-void LightGBMTrainer::computeGradientsSerial(const std::vector<double>& labels,
-                                             const std::vector<double>& predictions) {
-    size_t n = labels.size();
-    for (size_t i = 0; i < n; ++i) {
-        gradients_[i] = labels[i] - predictions[i];
-    }
 }
 
 std::vector<double> LightGBMTrainer::calculateFeatureImportance(int numFeatures) const {
@@ -274,6 +337,7 @@ std::unique_ptr<ISplitCriterion> LightGBMTrainer::createCriterion() const {
 
 std::unique_ptr<ISplitFinder> LightGBMTrainer::createOptimalSplitFinder() const {
     const std::string& method = config_.splitMethod;
+    
     if (method == "histogram_ew" || method.find("histogram_ew:") == 0) {
         int bins = config_.histogramBins;
         auto pos = method.find(':');
@@ -316,9 +380,29 @@ double LightGBMTrainer::predictSingleTree(const Node* tree,
                                           int /* rowLength */) const {
     const Node* cur = tree;
     while (cur && !cur->isLeaf) {
-        int featureIndex = cur->getFeatureIndex();
-        double value = sample[featureIndex];
+        const int featureIndex = cur->getFeatureIndex();
+        const double value = sample[featureIndex];
         cur = (value <= cur->getThreshold()) ? cur->getLeft() : cur->getRight();
     }
     return cur ? cur->getPrediction() : 0.0;
+}
+
+// **兼容性方法（保留旧接口）**
+void LightGBMTrainer::preprocessFeaturesSerial(const std::vector<double>& /* data */,
+                                               int rowLength,
+                                               size_t /* sampleSize */) {
+    // 串行简单 bundle（每个特征各占一个 bundle）
+    featureBundles_.clear();
+    featureBundles_.reserve(rowLength);
+    for (int i = 0; i < rowLength; ++i) {
+        FeatureBundle bundle;
+        bundle.features.push_back(i);
+        bundle.offsets.push_back(0.0);
+        bundle.totalBins = config_.maxBin;
+        featureBundles_.push_back(std::move(bundle));
+    }
+    if (config_.verbose) {
+        std::cout << "Feature Bundling (serial): " << rowLength << " -> "
+                  << featureBundles_.size() << " bundles" << std::endl;
+    }
 }

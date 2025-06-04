@@ -2,6 +2,7 @@
 // include/lightgbm/trainer/LightGBMTrainer.hpp
 // 深度 OpenMP 并行优化版本（阈值提高、成员变量预分配）
 // =============================================================================
+// 在 include/lightgbm/trainer/LightGBMTrainer.hpp 开头添加
 #pragma once
 
 #include "lightgbm/core/LightGBMConfig.hpp"
@@ -17,6 +18,9 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+// 添加优化数据结构的前向声明
+struct OptimizedFeatureBundles;
 
 /** LightGBM 训练器 - 深度 OpenMP 并行优化版本 */
 class LightGBMTrainer : public ITreeTrainer {
@@ -62,6 +66,30 @@ private:
     mutable std::vector<double> sampleWeights_;
 
     // 私有方法
+    void preprocessFeaturesOptimized(const std::vector<double>& data,
+                                    int rowLength,
+                                    size_t sampleSize,
+                                    OptimizedFeatureBundles& bundles);
+    
+    double computeLossOptimized(const std::vector<double>& labels,
+                               const std::vector<double>& predictions) const;
+    
+    void computeGradientsOptimized(const std::vector<double>& labels,
+                                  const std::vector<double>& predictions);
+    
+    void computeAbsGradients(std::vector<double>& absGradients) const;
+    
+    void normalizeWeights(size_t n);
+    
+    void prepareFullSample(size_t n);
+    
+    void updatePredictionsOptimized(const std::vector<double>& data,
+                                   int rowLength,
+                                   const Node* tree,
+                                   std::vector<double>& predictions,
+                                   size_t n) const;
+    
+    bool checkEarlyStop(int currentIter) const;
     void initializeComponents();
     void preprocessFeatures(const std::vector<double>& data,
                             int rowLength,
@@ -83,5 +111,6 @@ private:
     double predictSingleTree(const Node* tree,
                              const double* sample,
                              int rowLength) const;
+
 };
 

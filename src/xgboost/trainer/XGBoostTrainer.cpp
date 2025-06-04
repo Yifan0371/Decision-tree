@@ -1,5 +1,5 @@
 // =============================================================================
-// src/xgboost/trainer/XGBoostTrainer.cpp - OpenMP深度并行优化版本
+// src/xgboost/trainer/XGBoostTrainer.cpp - 优化版本（避免vector<vector>和new）
 // =============================================================================
 #include "xgboost/trainer/XGBoostTrainer.hpp"
 #include <algorithm>
@@ -11,6 +11,9 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+// 注意：此处不再定义 OptimizedSortedIndices，
+// 因为它已经在 XGBoostSplitFinder.hpp 中定义过了。
 
 XGBoostTrainer::XGBoostTrainer(const XGBoostConfig& config)
     : config_(config) {
@@ -37,7 +40,7 @@ void XGBoostTrainer::train(const std::vector<double>& data,
                           int rowLength,
                           const std::vector<double>& labels) {
     auto totalStart = std::chrono::high_resolution_clock::now();
-    size_t n = labels.size();
+    const size_t n = labels.size();
 
     if (config_.verbose) {
         std::cout << "Starting XGBoost training: " << n << " samples, " 
@@ -45,69 +48,65 @@ void XGBoostTrainer::train(const std::vector<double>& data,
     }
 
     // ======================================================
-    // **并行优化1: 全局预排序的并行化**
+    // **优化1: 使用优化的索引存储结构替代vector<vector>**
     // ======================================================
-    std::vector<std::vector<int>> sortedIndicesAll(rowLength);
+    OptimizedSortedIndices sortedIndices(rowLength, n);
     
     #pragma omp parallel for schedule(dynamic) if(rowLength > 4)
     for (int f = 0; f < rowLength; ++f) {
-        sortedIndicesAll[f].resize(n);
-        std::iota(sortedIndicesAll[f].begin(), sortedIndicesAll[f].end(), 0);
-        std::sort(sortedIndicesAll[f].begin(), sortedIndicesAll[f].end(),
-                  [&](int a, int b) {
-                      return data[a * rowLength + f] < data[b * rowLength + f];
-                  });
+        auto [start, end] = sortedIndices.getFeatureRange(f);
+        std::iota(start, end, 0);
+        std::sort(start, end, [&](int a, int b) {
+            return data[a * rowLength + f] < data[b * rowLength + f];
+        });
     }
 
     // 初始化根节点掩码
     std::vector<char> rootMask(n, 1);
 
     // 计算基准分数并初始化
-    double baseScore = computeBaseScore(labels);
+    const double baseScore = computeBaseScore(labels);
     model_.setGlobalBaseScore(baseScore);
 
     std::vector<double> predictions(n, baseScore);
     std::vector<double> gradients(n), hessians(n);
 
     // ======================================================
-    // **并行优化2: Boosting主循环优化**
+    // **优化2: Boosting主循环优化**
     // ======================================================
     for (int round = 0; round < config_.numRounds; ++round) {
         auto roundStart = std::chrono::high_resolution_clock::now();
 
-        // **并行优化3: 损失计算的并行**
-        double currentLoss = lossFunction_->computeBatchLoss(labels, predictions);
+        // **优化3: 损失计算的并行**
+        const double currentLoss = lossFunction_->computeBatchLoss(labels, predictions);
         trainingLoss_.push_back(currentLoss);
 
-        // **并行优化4: 梯度和Hessian计算的并行**
+        // **优化4: 梯度和Hessian计算的并行**
         lossFunction_->computeGradientsHessians(labels, predictions, gradients, hessians);
 
         // 调试输出和性能监控
-        if (config_.verbose) {
-            if (round <= 2 || round % 20 == 0) {
-                double totalGrad = 0.0, totalHess = 0.0;
-                
-                // **并行优化5: 梯度统计计算的并行**
-                #pragma omp parallel for reduction(+:totalGrad,totalHess) schedule(static)
-                for (size_t i = 0; i < n; ++i) {
-                    totalGrad += std::abs(gradients[i]);
-                    totalHess += hessians[i];
-                }
-                
-                std::cout << "Round " << round 
-                          << " | Loss: " << std::fixed << std::setprecision(6) << currentLoss
-                          << " | AvgGrad: " << (totalGrad / n)
-                          << " | TotalHess: " << totalHess << std::endl;
+        if (config_.verbose && (round <= 2 || round % 20 == 0)) {
+            double totalGrad = 0.0, totalHess = 0.0;
+            
+            #pragma omp parallel for reduction(+:totalGrad,totalHess) schedule(static)
+            for (size_t i = 0; i < n; ++i) {
+                totalGrad += std::abs(gradients[i]);
+                totalHess += hessians[i];
             }
+            
+            std::cout << "Round " << round 
+                      << " | Loss: " << std::fixed << std::setprecision(6) << currentLoss
+                      << " | AvgGrad: " << (totalGrad / n)
+                      << " | TotalHess: " << totalHess << std::endl;
         }
 
         // 行采样与列采样
         std::vector<int> sampleIndices, featureIndices;
         sampleData(data, rowLength, gradients, hessians, sampleIndices, featureIndices);
 
-        // **并行优化6: 树训练过程的并行**
-        auto tree = trainSingleTreeParallel(data, rowLength, gradients, hessians,
-                                            rootMask, sortedIndicesAll);
+        // **优化5: 使用优化的树训练**
+        auto tree = trainSingleTreeOptimized(data, rowLength, gradients, hessians,
+                                            rootMask, sortedIndices);
 
         if (!tree) {
             if (config_.verbose) {
@@ -116,7 +115,7 @@ void XGBoostTrainer::train(const std::vector<double>& data,
             break;
         }
 
-        // **并行优化7: 预测更新的并行**
+        // **优化6: 预测更新的并行**
         updatePredictionsParallel(data, rowLength, tree.get(), predictions);
 
         // 将新树加入模型
@@ -131,7 +130,7 @@ void XGBoostTrainer::train(const std::vector<double>& data,
                       << " | Trees: " << model_.getTreeCount() << std::endl;
         }
 
-        // **并行优化8: 收敛检查的优化**
+        // **优化7: 收敛检查**
         if (round > 10 && shouldConverge(gradients)) {
             if (config_.verbose) {
                 std::cout << "Converged at round " << round << std::endl;
@@ -141,7 +140,7 @@ void XGBoostTrainer::train(const std::vector<double>& data,
 
         // 验证集早停
         if (hasValidation_ && config_.earlyStoppingRounds > 0) {
-            double valLoss = computeValidationLoss();
+            const double valLoss = computeValidationLoss();
             validationLoss_.push_back(valLoss);
             
             if (shouldEarlyStop(validationLoss_, config_.earlyStoppingRounds)) {
@@ -170,38 +169,39 @@ void XGBoostTrainer::train(const std::vector<double>& data,
     }
 }
 
-// **新增方法：并行优化的树训练**
-std::unique_ptr<Node> XGBoostTrainer::trainSingleTreeParallel(
+// **新增方法：优化的树训练（避免vector<vector>）**
+std::unique_ptr<Node> XGBoostTrainer::trainSingleTreeOptimized(
     const std::vector<double>& X,
     int rowLength,
     const std::vector<double>& gradients,
     const std::vector<double>& hessians,
     const std::vector<char>& rootMask,
-    const std::vector<std::vector<int>>& sortedIndicesAll) const {
+    const OptimizedSortedIndices& sortedIndices) const {
 
-    // 创建根节点
+    // 使用智能指针创建根节点
     auto root = std::make_unique<Node>();
-    // 递归构建整棵树（已优化）
-    buildXGBNodeParallel(root.get(),
-                        X, rowLength, gradients, hessians,
-                        rootMask, sortedIndicesAll,
-                        /*depth=*/0);
+    
+    // 递归构建整棵树
+    buildXGBNodeOptimized(root.get(),
+                         X, rowLength, gradients, hessians,
+                         rootMask, sortedIndices,
+                         /*depth=*/0);
     return root;
 }
 
-// **新增方法：并行优化的节点构建**
-void XGBoostTrainer::buildXGBNodeParallel(Node* node,
+// **新增方法：优化的节点构建（避免vector<vector>）**
+void XGBoostTrainer::buildXGBNodeOptimized(Node* node,
                                           const std::vector<double>& X,
                                           int rowLength,
                                           const std::vector<double>& gradients,
                                           const std::vector<double>& hessians,
                                           const std::vector<char>& nodeMask,
-                                          const std::vector<std::vector<int>>& sortedIndicesAll,
+                                          const OptimizedSortedIndices& sortedIndices,
                                           int depth) const {
 
-    size_t n = nodeMask.size();
+    const size_t n = nodeMask.size();
 
-    // **并行优化9: 节点统计计算的并行**
+    // **优化8: 节点统计计算的并行**
     double G_parent = 0.0, H_parent = 0.0;
     int sampleCount = 0;
     
@@ -218,7 +218,7 @@ void XGBoostTrainer::buildXGBNodeParallel(Node* node,
     node->metric = xgbCriterion_->computeStructureScore(G_parent, H_parent);
 
     // 计算叶节点权重
-    double leafWeight = xgbCriterion_->computeLeafWeight(G_parent, H_parent);
+    const double leafWeight = xgbCriterion_->computeLeafWeight(G_parent, H_parent);
 
     // 停止条件检查
     if (depth >= config_.maxDepth || sampleCount < 2 || H_parent < config_.minChildWeight) {
@@ -226,12 +226,9 @@ void XGBoostTrainer::buildXGBNodeParallel(Node* node,
         return;
     }
 
-    // 寻找最优分裂（内部已优化）
-    auto [bestFeature, bestThreshold, bestGain] =
-        xgbFinder_->findBestSplitXGB(
-            X, rowLength, gradients, hessians,
-            nodeMask, sortedIndicesAll,
-            *xgbCriterion_);
+    // 寻找最优分裂（使用优化的方法）
+    auto [bestFeature, bestThreshold, bestGain] = 
+        findBestSplitOptimized(X, rowLength, gradients, hessians, nodeMask, sortedIndices);
 
     if (bestFeature < 0 || bestGain <= 0.0) {
         node->makeLeaf(leafWeight, leafWeight);
@@ -241,13 +238,13 @@ void XGBoostTrainer::buildXGBNodeParallel(Node* node,
     // 执行分裂
     node->makeInternal(bestFeature, bestThreshold);
 
-    // **并行优化10: 子节点掩码构建的并行**
+    // **优化9: 子节点掩码构建的并行**
     std::vector<char> leftMask(n, 0), rightMask(n, 0);
     
     #pragma omp parallel for schedule(static)
     for (size_t i = 0; i < n; ++i) {
         if (!nodeMask[i]) continue;
-        double val = X[i * rowLength + bestFeature];
+        const double val = X[i * rowLength + bestFeature];
         if (val <= bestThreshold) {
             leftMask[i] = 1;
         } else {
@@ -255,53 +252,136 @@ void XGBoostTrainer::buildXGBNodeParallel(Node* node,
         }
     }
 
-    // 递归构建左右子树
+    // 使用智能指针创建子节点
     node->leftChild = std::make_unique<Node>();
     node->rightChild = std::make_unique<Node>();
 
-    // **并行优化11: 子树构建的并行**
-    // 在深度较浅且数据量足够大时使用并行sections
-    bool useParallelSections = (depth <= 2) && (sampleCount > 5000);
+    // **优化10: 子树构建的并行**
+    const bool useParallelSections = (depth <= 2) && (sampleCount > 5000);
     
     if (useParallelSections) {
         #pragma omp parallel sections
         {
             #pragma omp section
             {
-                buildXGBNodeParallel(node->leftChild.get(),
+                buildXGBNodeOptimized(node->leftChild.get(),
                                     X, rowLength, gradients, hessians,
-                                    leftMask, sortedIndicesAll,
+                                    leftMask, sortedIndices,
                                     depth + 1);
             }
             #pragma omp section
             {
-                buildXGBNodeParallel(node->rightChild.get(),
+                buildXGBNodeOptimized(node->rightChild.get(),
                                     X, rowLength, gradients, hessians,
-                                    rightMask, sortedIndicesAll,
+                                    rightMask, sortedIndices,
                                     depth + 1);
             }
         }
     } else {
         // 串行递归
-        buildXGBNodeParallel(node->leftChild.get(),
+        buildXGBNodeOptimized(node->leftChild.get(),
                             X, rowLength, gradients, hessians,
-                            leftMask, sortedIndicesAll,
+                            leftMask, sortedIndices,
                             depth + 1);
-        buildXGBNodeParallel(node->rightChild.get(),
+        buildXGBNodeOptimized(node->rightChild.get(),
                             X, rowLength, gradients, hessians,
-                            rightMask, sortedIndicesAll,
+                            rightMask, sortedIndices,
                             depth + 1);
     }
 }
 
-// **新增方法：并行预测更新**
+// **新增方法：优化的分裂查找（避免vector<vector>）**
+std::tuple<int, double, double> XGBoostTrainer::findBestSplitOptimized(
+    const std::vector<double>& data,
+    int rowLength,
+    const std::vector<double>& gradients,
+    const std::vector<double>& hessians,
+    const std::vector<char>& nodeMask,
+    const OptimizedSortedIndices& sortedIndices) const {
+
+    const size_t n = nodeMask.size();
+
+    // 计算当前节点的统计信息
+    double G_parent = 0.0, H_parent = 0.0;
+    int sampleCount = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (nodeMask[i]) {
+            G_parent += gradients[i];
+            H_parent += hessians[i];
+            ++sampleCount;
+        }
+    }
+
+    if (sampleCount < 2 || H_parent < config_.minChildWeight) {
+        return {-1, 0.0, 0.0};
+    }
+
+    int bestFeature = -1;
+    double bestThreshold = 0.0;
+    double bestGain = -std::numeric_limits<double>::infinity();
+    constexpr double EPS = 1e-12;
+
+    // 遍历每个特征
+    for (int f = 0; f < rowLength; ++f) {
+        // 获取当前特征的排序索引
+        const int* featureIndices = sortedIndices.getFeatureData(f);
+        const size_t featureSize = sortedIndices.getFeatureSize();
+        
+        // 构造当前节点在特征f上的有序索引列表
+        std::vector<int> nodeSorted;
+        nodeSorted.reserve(sampleCount);
+        
+        for (size_t i = 0; i < featureSize; ++i) {
+            const int idx = featureIndices[i];
+            if (nodeMask[idx]) {
+                nodeSorted.push_back(idx);
+            }
+        }
+        
+        if (nodeSorted.size() < 2) continue;
+
+        // 遍历分裂点
+        double G_left = 0.0, H_left = 0.0;
+        for (size_t i = 0; i + 1 < nodeSorted.size(); ++i) {
+            const int idx = nodeSorted[i];
+            G_left += gradients[idx];
+            H_left += hessians[idx];
+
+            const int nextIdx = nodeSorted[i + 1];
+            const double currentVal = data[idx * rowLength + f];
+            const double nextVal = data[nextIdx * rowLength + f];
+
+            // 跳过相同特征值
+            if (std::abs(nextVal - currentVal) < EPS) continue;
+
+            const double G_right = G_parent - G_left;
+            const double H_right = H_parent - H_left;
+
+            // 检查约束
+            if (H_left < config_.minChildWeight || H_right < config_.minChildWeight) continue;
+
+            // 计算增益
+            const double gain = xgbCriterion_->computeSplitGain(
+                G_left, H_left, G_right, H_right, G_parent, H_parent, config_.gamma);
+
+            if (gain > bestGain) {
+                bestGain = gain;
+                bestFeature = f;
+                bestThreshold = 0.5 * (currentVal + nextVal);
+            }
+        }
+    }
+
+    return {bestFeature, bestThreshold, bestGain};
+}
+
+// **优化的预测更新方法**
 void XGBoostTrainer::updatePredictionsParallel(const std::vector<double>& data,
                                                int rowLength,
                                                const Node* tree,
                                                std::vector<double>& predictions) const {
-    size_t n = predictions.size();
+    const size_t n = predictions.size();
     
-    // **并行优化12: 预测更新的并行**
     #pragma omp parallel for schedule(static, 256) if(n > 1000)
     for (size_t i = 0; i < n; ++i) {
         const double* sample = &data[i * rowLength];
@@ -310,7 +390,7 @@ void XGBoostTrainer::updatePredictionsParallel(const std::vector<double>& data,
         // 单棵树预测
         const Node* cur = tree;
         while (cur && !cur->isLeaf) {
-            double val = sample[cur->getFeatureIndex()];
+            const double val = sample[cur->getFeatureIndex()];
             cur = (val <= cur->getThreshold()) ? cur->getLeft() : cur->getRight();
         }
         if (cur) {
@@ -321,9 +401,8 @@ void XGBoostTrainer::updatePredictionsParallel(const std::vector<double>& data,
     }
 }
 
-// **新增方法：并行收敛检查**
 bool XGBoostTrainer::shouldConverge(const std::vector<double>& gradients) const {
-    size_t n = gradients.size();
+    const size_t n = gradients.size();
     double totalGrad = 0.0;
     
     #pragma omp parallel for reduction(+:totalGrad) schedule(static)
@@ -339,16 +418,15 @@ void XGBoostTrainer::evaluate(const std::vector<double>& X,
                               const std::vector<double>& y,
                               double& mse,
                               double& mae) {
-    auto predictions = model_.predictBatch(X, rowLength);
-    size_t n = y.size();
+    const auto predictions = model_.predictBatch(X, rowLength);
+    const size_t n = y.size();
 
-    // **并行优化13: 评估指标计算的并行**
     mse = 0.0;
     mae = 0.0;
     
     #pragma omp parallel for reduction(+:mse,mae) schedule(static, 1024) if(n > 2000)
     for (size_t i = 0; i < n; ++i) {
-        double diff = y[i] - predictions[i];
+        const double diff = y[i] - predictions[i];
         mse += diff * diff;
         mae += std::abs(diff);
     }
@@ -358,10 +436,9 @@ void XGBoostTrainer::evaluate(const std::vector<double>& X,
 }
 
 double XGBoostTrainer::computeBaseScore(const std::vector<double>& y) const {
-    size_t n = y.size();
+    const size_t n = y.size();
     double sum = 0.0;
     
-    // **并行优化14: 基准分数计算的并行**
     #pragma omp parallel for reduction(+:sum) schedule(static) if(n > 2000)
     for (size_t i = 0; i < n; ++i) {
         sum += y[i];
@@ -382,12 +459,11 @@ void XGBoostTrainer::sampleData(const std::vector<double>& /* X */,
         return;
     }
     
-    size_t n = gradients.size();
-    size_t sampleSize = static_cast<size_t>(n * config_.subsample);
+    const size_t n = gradients.size();
+    const size_t sampleSize = static_cast<size_t>(n * config_.subsample);
 
-    // **并行优化15: 采样过程的优化**
-    static thread_local std::mt19937 gen(std::random_device{}());
-    static thread_local std::vector<int> allIndices;
+    thread_local std::mt19937 gen(std::random_device{}());
+    thread_local std::vector<int> allIndices;
     
     if (allIndices.size() != n) {
         allIndices.resize(n);
@@ -400,14 +476,14 @@ void XGBoostTrainer::sampleData(const std::vector<double>& /* X */,
 
 bool XGBoostTrainer::shouldEarlyStop(const std::vector<double>& losses, int patience) const {
     if (static_cast<int>(losses.size()) < patience + 1) return false;
-    double bestLoss = *std::min_element(losses.end() - patience - 1, losses.end() - 1);
-    double currentLoss = losses.back();
+    const double bestLoss = *std::min_element(losses.end() - patience - 1, losses.end() - 1);
+    const double currentLoss = losses.back();
     return currentLoss >= bestLoss - config_.tolerance;
 }
 
 double XGBoostTrainer::computeValidationLoss() const {
     if (!hasValidation_) return 0.0;
-    auto predictions = model_.predictBatch(X_val_, valRowLength_);
+    const auto predictions = model_.predictBatch(X_val_, valRowLength_);
     return lossFunction_->computeBatchLoss(y_val_, predictions);
 }
 
@@ -415,7 +491,7 @@ double XGBoostTrainer::predict(const double* sample, int rowLength) const {
     return model_.predict(sample, rowLength);
 }
 
-// 保留原有方法作为兼容性接口
+// 保留旧接口的兼容性
 std::unique_ptr<Node> XGBoostTrainer::trainSingleTree(
     const std::vector<double>& X,
     int rowLength,
@@ -424,17 +500,12 @@ std::unique_ptr<Node> XGBoostTrainer::trainSingleTree(
     const std::vector<char>& rootMask,
     const std::vector<std::vector<int>>& sortedIndicesAll) const {
     
-    return trainSingleTreeParallel(X, rowLength, gradients, hessians, rootMask, sortedIndicesAll);
-}
-
-void XGBoostTrainer::buildXGBNode(Node* node,
-                                  const std::vector<double>& X,
-                                  int rowLength,
-                                  const std::vector<double>& gradients,
-                                  const std::vector<double>& hessians,
-                                  const std::vector<char>& nodeMask,
-                                  const std::vector<std::vector<int>>& sortedIndicesAll,
-                                  int depth) const {
+    // 转换为优化的数据结构
+    OptimizedSortedIndices optimizedIndices(rowLength, gradients.size());
+    for (int f = 0; f < rowLength; ++f) {
+        auto [start, end] = optimizedIndices.getFeatureRange(f);
+        std::copy(sortedIndicesAll[f].begin(), sortedIndicesAll[f].end(), start);
+    }
     
-    buildXGBNodeParallel(node, X, rowLength, gradients, hessians, nodeMask, sortedIndicesAll, depth);
+    return trainSingleTreeOptimized(X, rowLength, gradients, hessians, rootMask, optimizedIndices);
 }

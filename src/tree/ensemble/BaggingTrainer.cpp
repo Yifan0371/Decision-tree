@@ -1,3 +1,6 @@
+// =============================================================================
+// src/tree/ensemble/BaggingTrainer.cpp - 优化版本（避免vector拷贝和new）
+// =============================================================================
 #include "ensemble/BaggingTrainer.hpp"
 
 // 准则
@@ -66,7 +69,7 @@ std::unique_ptr<ISplitFinder> BaggingTrainer::createSplitFinder() const {
     }
     else if (method == "random" || method.find("random:") == 0) {
         int k = 10;
-        auto pos = method.find(':');
+        const auto pos = method.find(':');
         if (pos != std::string::npos) {
             k = std::stoi(method.substr(pos + 1));
         }
@@ -77,7 +80,7 @@ std::unique_ptr<ISplitFinder> BaggingTrainer::createSplitFinder() const {
     }
     else if (method == "histogram_ew" || method.find("histogram_ew:") == 0) {
         int bins = 64;
-        auto pos = method.find(':');
+        const auto pos = method.find(':');
         if (pos != std::string::npos) {
             bins = std::stoi(method.substr(pos + 1));
         }
@@ -85,7 +88,7 @@ std::unique_ptr<ISplitFinder> BaggingTrainer::createSplitFinder() const {
     }
     else if (method == "histogram_eq" || method.find("histogram_eq:") == 0) {
         int bins = 64;
-        auto pos = method.find(':');
+        const auto pos = method.find(':');
         if (pos != std::string::npos) {
             bins = std::stoi(method.substr(pos + 1));
         }
@@ -93,7 +96,7 @@ std::unique_ptr<ISplitFinder> BaggingTrainer::createSplitFinder() const {
     }
     else if (method == "adaptive_ew" || method.find("adaptive_ew:") == 0) {
         std::string rule = "sturges";
-        auto pos = method.find(':');
+        const auto pos = method.find(':');
         if (pos != std::string::npos) {
             rule = method.substr(pos + 1);
         }
@@ -116,7 +119,7 @@ std::unique_ptr<ISplitCriterion> BaggingTrainer::createCriterion() const {
         return std::make_unique<HuberCriterion>();
     else if (crit.rfind("quantile", 0) == 0) {
         double tau = 0.5;
-        auto pos = crit.find(':');
+        const auto pos = crit.find(':');
         if (pos != std::string::npos)
             tau = std::stod(crit.substr(pos + 1));
         return std::make_unique<QuantileCriterion>(tau);
@@ -149,30 +152,29 @@ std::unique_ptr<IPruner> BaggingTrainer::createPruner(const std::vector<double>&
     }
 }
 
-// **优化1: 高效Bootstrap采样 - 线程安全版本**
+// **优化1: 高效Bootstrap采样 - 避免vector拷贝**
 void BaggingTrainer::bootstrapSample(int dataSize,
                                      std::vector<int>& sampleIndices,
                                      std::vector<int>& oobIndices,
                                      std::mt19937& localGen) const {
-    int sampleSize = static_cast<int>(dataSize * sampleRatio_);
+    const int sampleSize = static_cast<int>(dataSize * sampleRatio_);
     
+    // **预分配精确大小，避免重新分配**
     sampleIndices.clear();
     sampleIndices.reserve(sampleSize);
     
-    // 使用线程局部随机数生成器
-    std::uniform_int_distribution<int> dist(0, dataSize - 1);
-    
-    // 使用bitset跟踪采样状态
+    // **使用高效的位图跟踪采样状态**
     std::vector<bool> sampledBits(dataSize, false);
     
     // Bootstrap采样（有放回采样）
+    std::uniform_int_distribution<int> dist(0, dataSize - 1);
     for (int i = 0; i < sampleSize; ++i) {
-        int idx = dist(localGen);
+        const int idx = dist(localGen);
         sampleIndices.push_back(idx);
         sampledBits[idx] = true;
     }
     
-    // 计算袋外样本
+    // **计算袋外样本**
     oobIndices.clear();
     oobIndices.reserve(dataSize - sampleSize);
     for (int i = 0; i < dataSize; ++i) {
@@ -182,7 +184,7 @@ void BaggingTrainer::bootstrapSample(int dataSize,
     }
 }
 
-// **优化2: 零拷贝数据传递**
+// **优化2: 零拷贝数据传递 - 使用引用和move语义**
 void BaggingTrainer::extractSubsetOptimized(const std::vector<double>& originalData,
                                            int rowLength,
                                            const std::vector<double>& originalLabels,
@@ -190,21 +192,22 @@ void BaggingTrainer::extractSubsetOptimized(const std::vector<double>& originalD
                                            std::vector<double>& subData,
                                            std::vector<double>& subLabels) const {
     
-    int featCount = rowLength;
-    size_t totalSize = indices.size() * featCount;
+    const int featCount = rowLength;
+    const size_t totalSize = indices.size() * featCount;
     
-    // 预分配确切大小，避免重新分配
+    // **预分配确切大小，避免重新分配**
     subData.resize(totalSize);
     subLabels.resize(indices.size());
     
-    // 批量复制，更好的缓存局部性
+    // **优化的批量复制 - 更好的缓存局部性**
+    #pragma omp parallel for schedule(static) if(indices.size() > 500)
     for (size_t i = 0; i < indices.size(); ++i) {
-        int idx = indices[i];
+        const int idx = indices[i];
         
-        // 使用memcpy优化连续内存复制
-        std::copy(originalData.begin() + idx * featCount,
-                 originalData.begin() + (idx + 1) * featCount,
-                 subData.begin() + i * featCount);
+        // **使用内存连续复制优化**
+        const double* srcStart = &originalData[idx * featCount];
+        double* dstStart = &subData[i * featCount];
+        std::copy(srcStart, srcStart + featCount, dstStart);
         
         subLabels[i] = originalLabels[idx];
     }
@@ -216,7 +219,7 @@ void BaggingTrainer::train(const std::vector<double>& data,
     trees_.clear();
     oobIndices_.clear();
     
-    int dataSize = static_cast<int>(labels.size());
+    const int dataSize = static_cast<int>(labels.size());
     
     // **数据验证**
     if (dataSize == 0 || data.empty() || rowLength <= 0) {
@@ -230,7 +233,7 @@ void BaggingTrainer::train(const std::vector<double>& data,
     }
     
     #ifdef _OPENMP
-    int numThreads = omp_get_max_threads();
+    const int numThreads = omp_get_max_threads();
     std::cout << "Training " << numTrees_ << " trees with " << numThreads 
               << " OpenMP threads..." << std::endl;
     std::cout << "Dataset: " << dataSize << " samples, " << rowLength 
@@ -243,71 +246,69 @@ void BaggingTrainer::train(const std::vector<double>& data,
     trees_.resize(numTrees_);
     oobIndices_.resize(numTrees_);
     
-    // 记录完成的树数量（线程安全计数）
+    // **原子计数器用于线程安全的进度跟踪**
     std::atomic<int> completedTrees(0);
     
-    // **核心：并行训练多棵树**
-    #pragma omp parallel for schedule(dynamic, 1) if(numTrees_ > 1)
-    for (int t = 0; t < numTrees_; ++t) {
+    // **核心：并行训练多棵树 - 避免vector拷贝**
+    #pragma omp parallel if(numTrees_ > 1)
+    {
         // **线程局部随机数生成器**
-        thread_local static std::mt19937 localGen;
-        thread_local static bool initialized = false;
+        thread_local std::mt19937 localGen;
+        thread_local bool initialized = false;
         if (!initialized) {
-            // 使用线程ID和原始种子创建不同的种子
             #ifdef _OPENMP
-            localGen.seed(gen_() + omp_get_thread_num() * 1000 + t);
+            const int threadId = omp_get_thread_num();
+            localGen.seed(gen_() + threadId * 1000);
             #else
-            localGen.seed(gen_() + t);
+            localGen.seed(gen_());
             #endif
             initialized = true;
         }
         
-        // **线程局部数据缓冲区**
+        // **线程局部数据缓冲区 - 避免重复分配**
         std::vector<int> sampleIndices, oobIndices;
         std::vector<double> subData, subLabels;
         
-        // Bootstrap采样
-        bootstrapSample(dataSize, sampleIndices, oobIndices, localGen);
-        
-        // 数据提取
-        extractSubsetOptimized(data, rowLength, labels, sampleIndices, 
-                              subData, subLabels);
-        
-        // 创建并训练单棵树
-        auto finder = createSplitFinder();
-        auto criterion = createCriterion();
-        auto pruner = createPruner({}, rowLength, {});
-        
-        auto tree = std::make_unique<SingleTreeTrainer>(
-            std::move(finder),
-            std::move(criterion),
-            std::move(pruner),
-            maxDepth_,
-            minSamplesLeaf_
-        );
-        
-        tree->train(subData, rowLength, subLabels);
-        
-        // **线程安全的结果存储**
-        trees_[t] = std::move(tree);
-        oobIndices_[t] = std::move(oobIndices);
-        
-        // **线程安全的进度输出**
-        int completed = ++completedTrees;
-        if (completed % std::max(1, numTrees_ / 10) == 0) {
-            #pragma omp critical(progress_output)
-            {
-                std::cout << "Completed " << completed << "/" << numTrees_ 
-                          << " trees (" << std::fixed << std::setprecision(1) 
-                          << 100.0 * completed / numTrees_ << "%)" << std::endl;
-                std::cout.flush(); // 强制刷新输出
+        #pragma omp for schedule(dynamic, 1)
+        for (int t = 0; t < numTrees_; ++t) {
+            // Bootstrap采样
+            bootstrapSample(dataSize, sampleIndices, oobIndices, localGen);
+            
+            // **高效数据提取 - 避免不必要的拷贝**
+            extractSubsetOptimized(data, rowLength, labels, sampleIndices, 
+                                  subData, subLabels);
+            
+            // **创建单棵树 - 使用智能指针管理内存**
+            auto tree = std::make_unique<SingleTreeTrainer>(
+                createSplitFinder(),
+                createCriterion(),
+                createPruner({}, rowLength, {}),
+                maxDepth_,
+                minSamplesLeaf_
+            );
+            
+            tree->train(subData, rowLength, subLabels);
+            
+            // **线程安全的结果存储**
+            trees_[t] = std::move(tree);
+            oobIndices_[t] = std::move(oobIndices);
+            
+            // **线程安全的进度输出**
+            const int completed = ++completedTrees;
+            if (completed % std::max(1, numTrees_ / 10) == 0) {
+                #pragma omp critical(progress_output)
+                {
+                    std::cout << "Completed " << completed << "/" << numTrees_ 
+                              << " trees (" << std::fixed << std::setprecision(1) 
+                              << 100.0 * completed / numTrees_ << "%)" << std::endl;
+                    std::cout.flush();
+                }
             }
         }
     }
     
     std::cout << "Bagging training completed!" << std::endl;
     
-    // **性能统计**
     #ifdef _OPENMP
     std::cout << "Used " << omp_get_max_threads() << " threads for parallel training" << std::endl;
     #endif
@@ -334,15 +335,15 @@ void BaggingTrainer::evaluate(const std::vector<double>& X,
                              const std::vector<double>& y,
                              double& mse,
                              double& mae) {
-    size_t n = y.size();
+    const size_t n = y.size();
     mse = 0.0;
     mae = 0.0;
     
     // **并行评估**
     #pragma omp parallel for reduction(+:mse,mae) schedule(static, 256) if(n > 1000)
     for (size_t i = 0; i < n; ++i) {
-        double pred = predict(&X[i * rowLength], rowLength);
-        double diff = y[i] - pred;
+        const double pred = predict(&X[i * rowLength], rowLength);
+        const double diff = y[i] - pred;
         mse += diff * diff;
         mae += std::abs(diff);
     }
@@ -351,14 +352,14 @@ void BaggingTrainer::evaluate(const std::vector<double>& X,
     mae /= n;
 }
 
-// **优化5: 高效特征重要性计算**
+// **优化5: 高效特征重要性计算 - 避免递归和vector拷贝**
 std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const {
     std::vector<double> importance(numFeatures, 0.0);
     
     // **并行计算特征重要性**
     #pragma omp parallel if(trees_.size() > 10)
     {
-        // 线程局部重要性累加器
+        // **线程局部重要性累加器**
         std::vector<double> localImportance(numFeatures, 0.0);
         
         #pragma omp for schedule(static) nowait
@@ -368,7 +369,7 @@ std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const 
             const Node* root = trees_[t]->getRoot();
             if (!root || root->isLeaf) continue;
             
-            // 使用栈实现的非递归遍历
+            // **使用栈实现的非递归遍历 - 避免递归开销**
             std::vector<const Node*> nodeStack;
             nodeStack.reserve(1000);
             nodeStack.push_back(root);
@@ -379,7 +380,7 @@ std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const 
                 
                 if (!node || node->isLeaf) continue;
                 
-                int feat = node->getFeatureIndex();
+                const int feat = node->getFeatureIndex();
                 if (feat >= 0 && feat < numFeatures) {
                     localImportance[feat] += 1.0;
                 }
@@ -398,25 +399,26 @@ std::vector<double> BaggingTrainer::getFeatureImportance(int numFeatures) const 
         }
     }
     
-    // 归一化
-    double total = std::accumulate(importance.begin(), importance.end(), 0.0);
+    // **归一化**
+    const double total = std::accumulate(importance.begin(), importance.end(), 0.0);
     if (total > 0) {
-        double invTotal = 1.0 / total;
-        for (double& imp : importance) {
-            imp *= invTotal;
+        const double invTotal = 1.0 / total;
+        #pragma omp parallel for schedule(static) if(numFeatures > 100)
+        for (int i = 0; i < numFeatures; ++i) {
+            importance[i] *= invTotal;
         }
     }
     
     return importance;
 }
 
-// **优化6: 批量OOB计算**
+// **优化6: 批量OOB计算 - 避免vector拷贝**
 double BaggingTrainer::getOOBError(const std::vector<double>& data,
                                   int rowLength,
                                   const std::vector<double>& labels) const {
     if (trees_.empty() || oobIndices_.empty()) return 0.0;
     
-    int dataSize = static_cast<int>(labels.size());
+    const int dataSize = static_cast<int>(labels.size());
     std::vector<double> oobPredictions(dataSize, 0.0);
     std::vector<int> oobCounts(dataSize, 0);
     
@@ -427,9 +429,9 @@ double BaggingTrainer::getOOBError(const std::vector<double>& data,
         
         const auto& oobSet = oobIndices_[t];
         
-        // 对当前树的OOB样本进行预测
-        for (int idx : oobSet) {
-            double pred = trees_[t]->predict(&data[idx * rowLength], rowLength);
+        // **对当前树的OOB样本进行预测**
+        for (const int idx : oobSet) {
+            const double pred = trees_[t]->predict(&data[idx * rowLength], rowLength);
             
             // **线程安全的累加**
             #pragma omp atomic
@@ -440,19 +442,27 @@ double BaggingTrainer::getOOBError(const std::vector<double>& data,
         }
     }
     
-    // 计算OOB误差
+    // **计算OOB误差**
     double oobMSE = 0.0;
     int validCount = 0;
     
     #pragma omp parallel for reduction(+:oobMSE,validCount) schedule(static)
     for (int i = 0; i < dataSize; ++i) {
         if (oobCounts[i] > 0) {
-            double avgPred = oobPredictions[i] / oobCounts[i];
-            double diff = labels[i] - avgPred;
+            const double avgPred = oobPredictions[i] / oobCounts[i];
+            const double diff = labels[i] - avgPred;
             oobMSE += diff * diff;
             validCount++;
         }
     }
     
     return validCount > 0 ? oobMSE / validCount : 0.0;
+}
+
+// **保留旧接口的兼容性方法**
+void BaggingTrainer::bootstrapSample(int dataSize,
+                                     std::vector<int>& sampleIndices,
+                                     std::vector<int>& oobIndices) const {
+    thread_local std::mt19937 localGen(gen_());
+    bootstrapSample(dataSize, sampleIndices, oobIndices, localGen);
 }

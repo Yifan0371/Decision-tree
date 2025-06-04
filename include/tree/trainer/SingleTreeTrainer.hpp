@@ -58,6 +58,12 @@ private:
                             int currentDepth,
                             int& maxDepth,
                             int& leafCount) const;
+    void splitNodeOptimized(Node* node,
+                           const std::vector<double>& data,
+                           int rowLength,
+                           const std::vector<double>& labels,
+                           std::vector<int>& indices,
+                           int depth);
 
     int  maxDepth_;
     int  minSamplesLeaf_;
