@@ -1,0 +1,39 @@
+===============================================
+GBRT DART Weak Scaling Performance Test Log
+运行时间: 2025年 06月 04日 星期三 23:51:13 CEST
+项目根: /home/yifan/桌面/CHPS_M1/ppn重启/6-4优化/6并行优化/Decision-tree
+===============================================
+PROJECT_ROOT=/home/yifan/桌面/CHPS_M1/ppn重启/6-4优化/6并行优化/Decision-tree
+物理核心数 (排除超线程)：4，已设置 OMP_NUM_THREADS=4
+总行数 (不含 header): 14795，物理核数: 4，基准行数 BASE=3698
+===============================================
+   GBRT DART Weak Scaling Performance Test    
+===============================================
+Fixed Parameters (per thread):
+  Loss: squared | Iterations: 30
+  Learning Rate: 0.1 | Max Depth: 4
+  Min Leaf: 1 | Criterion: mse
+  Split Method: exhaustive | Subsample: 1.0
+  DART: enabled | Drop Rate: 0.15
+  Normalize: false | Skip Drop: false
+  Base rows per thread: 3698
+
+Threads | SubsetRows | Elapsed(ms) | TestMSE    | TrainTime  | Efficiency
+--------|------------|-------------|------------|------------|----------
+      1 |       3698 |         265 | 0.000248   | 254ms      | 1.00
+      2 |       7396 |         532 | 0.000263   | 507ms      | .49
+      4 |      14792 |         442 | 0.000239   | 406ms      | .59
+
+===============================================
+DART Weak Scaling Analysis:
+- 理想: 随着线程数增加，处理更多数据但时间保持恒定
+- 效率 = 单线程时间 / 当前时间
+- 关注点: 效率接近1.0表示良好的 weak scaling
+- 数据量按线程数线性增长，计算复杂度也线性增长
+
+DART特有挑战:
+- Dropout机制增加内存访问复杂度
+- 随机选择过程可能不完全可并行
+- 权重调整步骤的同步开销
+- 预期weak scaling效率: 0.7-0.9
+===============================================

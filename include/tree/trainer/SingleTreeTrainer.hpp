@@ -8,6 +8,12 @@
 #include <memory>
 #include <vector>
 #include <iostream>
+#include <queue>
+#include <atomic>
+
+// 前向声明
+struct SplitTask;
+class TaskQueue;
 
 class SingleTreeTrainer : public ITreeTrainer {
 public:
@@ -31,7 +37,20 @@ public:
                   double& mae) override;
 
 private:
+    // **新增：任务队列驱动的树构建方法**
+    void buildTreeWithTaskQueue(const std::vector<double>& data,
+                                int rowLength,
+                                const std::vector<double>& labels,
+                                std::vector<int>&& rootIndices);
     
+    void processTask(const std::vector<double>& data,
+                     int rowLength,
+                     const std::vector<double>& labels,
+                     std::unique_ptr<SplitTask> task,
+                     TaskQueue& taskQueue,
+                     std::atomic<int>& totalTasks);
+    
+    // 原有方法（优化版本）
     void splitNode(Node* node,
                    const std::vector<double>& data,
                    int rowLength,
@@ -46,7 +65,6 @@ private:
                           std::vector<int>& indices,
                           int depth);
 
-    
     void splitNodeInPlaceParallel(Node* node,
                                   const std::vector<double>& data,
                                   int rowLength,
@@ -58,6 +76,7 @@ private:
                             int currentDepth,
                             int& maxDepth,
                             int& leafCount) const;
+                            
     void splitNodeOptimized(Node* node,
                            const std::vector<double>& data,
                            int rowLength,
@@ -70,4 +89,8 @@ private:
     std::unique_ptr<ISplitFinder>    finder_;
     std::unique_ptr<ISplitCriterion> criterion_;
     std::unique_ptr<IPruner>         pruner_;
+    
+    // **教授建议：友元类允许 BaggingTrainer 访问内部结构**
+    friend class BaggingTrainer;
+    friend class IndexedSingleTreeTrainer;
 };

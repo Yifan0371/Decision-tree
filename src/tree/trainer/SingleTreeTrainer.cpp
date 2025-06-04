@@ -1,5 +1,5 @@
 // =============================================================================
-// src/tree/trainer/SingleTreeTrainer.cpp - 优化版本（避免vector拷贝和new）
+// src/tree/trainer/SingleTreeTrainer.cpp - 任务队列策略优化版本
 // =============================================================================
 #include "tree/trainer/SingleTreeTrainer.hpp"
 #include "tree/Node.hpp"
@@ -11,13 +11,69 @@
 #include <memory>
 #include <chrono>
 #include <iomanip>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-SingleTreeTrainer::SingleTreeTrainer(std::unique_ptr<ISplitFinder>   finder,
+// **任务队列数据结构**
+struct SplitTask {
+    Node* node;
+    std::vector<int> indices;
+    int depth;
+    
+    SplitTask(Node* n, std::vector<int>&& idx, int d) 
+        : node(n), indices(std::move(idx)), depth(d) {}
+};
+
+// **线程安全的任务队列**
+class TaskQueue {
+private:
+    std::queue<std::unique_ptr<SplitTask>> tasks_;
+    mutable std::mutex mutex_;
+    std::condition_variable condition_;
+    std::atomic<bool> finished_{false};
+    
+public:
+    void push(std::unique_ptr<SplitTask> task) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        tasks_.push(std::move(task));
+        condition_.notify_one();
+    }
+    
+    std::unique_ptr<SplitTask> pop() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this] { return !tasks_.empty() || finished_; });
+        
+        if (tasks_.empty()) return nullptr;
+        
+        auto task = std::move(tasks_.front());
+        tasks_.pop();
+        return task;
+    }
+    
+    bool empty() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return tasks_.empty();
+    }
+    
+    void finish() {
+        finished_ = true;
+        condition_.notify_all();
+    }
+    
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return tasks_.size();
+    }
+};
+
+SingleTreeTrainer::SingleTreeTrainer(std::unique_ptr<ISplitFinder> finder,
                                      std::unique_ptr<ISplitCriterion> criterion,
-                                     std::unique_ptr<IPruner>        pruner,
+                                     std::unique_ptr<IPruner> pruner,
                                      int maxDepth,
                                      int minSamplesLeaf)
     : maxDepth_(maxDepth),
@@ -32,47 +88,29 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     
     auto trainStart = std::chrono::high_resolution_clock::now();
     
-    // **优化1: 使用智能指针预分配根节点**
     root_ = std::make_unique<Node>();
     
+    // **移除 omp_set_num_threads 调用，改用环境变量控制**
+    int numThreads = 1;
     #ifdef _OPENMP
-    omp_set_dynamic(1);  // 允许运行时调整线程数
-    #pragma omp parallel
-    {
-        #pragma omp single
-        {
-            std::cout << "Using " << omp_get_num_threads() << " OpenMP threads" << std::endl;
-        }
-    }
+    numThreads = omp_get_max_threads();
+    std::cout << "Using " << numThreads << " OpenMP threads (controlled by OMP_NUM_THREADS)" << std::endl;
     #endif
     
-    // **优化2: 预分配索引数组并避免不必要的拷贝**
-    std::vector<int> indices;
-    indices.reserve(labels.size());
+    // 预分配索引数组
+    std::vector<int> rootIndices(labels.size());
+    std::iota(rootIndices.begin(), rootIndices.end(), 0);
     
-    #pragma omp parallel for schedule(static, 1024) if(labels.size() > 5000)
-    for (size_t i = 0; i < labels.size(); ++i) {
-        #pragma omp critical
-        indices.push_back(static_cast<int>(i));
-    }
+    // **教授建议的任务队列/线程池模式**
+    const bool useTaskQueue = (labels.size() > 1000 && numThreads > 1);
     
-    // 如果数据量小，直接串行初始化
-    if (labels.size() <= 5000) {
-        indices.resize(labels.size());
-        std::iota(indices.begin(), indices.end(), 0);
-    }
-    
-    // **优化3: 智能并行策略选择**
-    if (labels.size() > 5000) {
-        std::cout << "Large dataset detected (" << labels.size() 
-                  << " samples), using enhanced parallel strategy" << std::endl;
-    } else if (labels.size() > 1000) {
-        std::cout << "Medium dataset detected, using balanced parallel strategy" << std::endl;
+    if (useTaskQueue) {
+        std::cout << "Large dataset detected, using task queue strategy" << std::endl;
+        buildTreeWithTaskQueue(data, rowLength, labels, std::move(rootIndices));
     } else {
-        std::cout << "Small dataset detected, using conservative parallel strategy" << std::endl;
+        std::cout << "Small dataset, using optimized recursive strategy" << std::endl;
+        splitNodeOptimized(root_.get(), data, rowLength, labels, rootIndices, 0);
     }
-    
-    splitNodeOptimized(root_.get(), data, rowLength, labels, indices, 0);
     
     auto splitEnd = std::chrono::high_resolution_clock::now();
     
@@ -83,7 +121,6 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     
     auto trainEnd = std::chrono::high_resolution_clock::now();
     
-    // **优化4: 详细的性能统计**
     auto splitTime = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - trainStart);
     auto pruneTime = std::chrono::duration_cast<std::chrono::milliseconds>(pruneEnd - pruneStart);
     auto totalTime = std::chrono::duration_cast<std::chrono::milliseconds>(trainEnd - trainStart);
@@ -96,41 +133,77 @@ void SingleTreeTrainer::train(const std::vector<double>& data,
     std::cout << "  Split time: " << splitTime.count() << "ms" 
               << " | Prune time: " << pruneTime.count() << "ms"
               << " | Total: " << totalTime.count() << "ms" << std::endl;
-    std::cout << "  Samples/ms: " << std::fixed << std::setprecision(1) 
-              << (labels.size() / static_cast<double>(std::max(1L, totalTime.count()))) << std::endl;
 }
 
-// **新方法：优化的节点分裂（避免vector拷贝）**
-void SingleTreeTrainer::splitNodeOptimized(Node* node,
-                                           const std::vector<double>& data,
-                                           int rowLength,
-                                           const std::vector<double>& labels,
-                                           std::vector<int>& indices,
-                                           int depth) {
+// **新方法：任务队列驱动的树构建**
+void SingleTreeTrainer::buildTreeWithTaskQueue(const std::vector<double>& data,
+                                               int rowLength,
+                                               const std::vector<double>& labels,
+                                               std::vector<int>&& rootIndices) {
+    
+    TaskQueue taskQueue;
+    std::atomic<int> activeWorkers{0};
+    std::atomic<int> totalTasks{0};
+    
+    // 创建根任务
+    auto rootTask = std::make_unique<SplitTask>(root_.get(), std::move(rootIndices), 0);
+    taskQueue.push(std::move(rootTask));
+    totalTasks++;
+    
+    const int numWorkers = std::min(omp_get_max_threads(), 8); // 限制最大线程数
+    
+    #pragma omp parallel num_threads(numWorkers)
+    {
+        const int threadId = omp_get_thread_num();
+        
+        while (true) {
+            auto task = taskQueue.pop();
+            if (!task) break; // 队列已完成
+            
+            activeWorkers++;
+            
+            // 处理当前任务
+            processTask(data, rowLength, labels, std::move(task), taskQueue, totalTasks);
+            
+            activeWorkers--;
+            
+            // 检查是否所有工作完成
+            if (activeWorkers == 0 && taskQueue.empty()) {
+                taskQueue.finish();
+                break;
+            }
+        }
+    }
+    
+    std::cout << "Task queue processing completed. Total tasks: " << totalTasks.load() << std::endl;
+}
+
+// **任务处理方法**
+void SingleTreeTrainer::processTask(const std::vector<double>& data,
+                                    int rowLength,
+                                    const std::vector<double>& labels,
+                                    std::unique_ptr<SplitTask> task,
+                                    TaskQueue& taskQueue,
+                                    std::atomic<int>& totalTasks) {
+    
+    Node* node = task->node;
+    const auto& indices = task->indices;
+    const int depth = task->depth;
+    
     if (indices.empty()) {
         node->makeLeaf(0.0);
         return;
     }
     
-    node->metric  = criterion_->nodeMetric(labels, indices);
+    node->metric = criterion_->nodeMetric(labels, indices);
     node->samples = indices.size();
     
-    // **优化: 高效计算节点预测值**
+    // **高效计算节点预测值**
     double sum = 0.0;
-    const size_t numSamples = indices.size();
-    
-    if (numSamples > 1000) {
-        #pragma omp parallel for reduction(+:sum) schedule(static)
-        for (size_t i = 0; i < numSamples; ++i) {
-            sum += labels[indices[i]];
-        }
-    } else {
-        // 小数据集使用串行计算（避免并行开销）
-        for (size_t i = 0; i < numSamples; ++i) {
-            sum += labels[indices[i]];
-        }
+    for (size_t i = 0; i < indices.size(); ++i) {
+        sum += labels[indices[i]];
     }
-    const double nodePrediction = sum / numSamples;
+    const double nodePrediction = sum / indices.size();
     
     // **停止条件检查**
     if (depth >= maxDepth_ || 
@@ -158,7 +231,107 @@ void SingleTreeTrainer::splitNodeOptimized(Node* node,
         }
     }
 
-    // **优化: 原地分割策略（避免vector拷贝）**
+    // **原地分割**
+    std::vector<int> leftIndices, rightIndices;
+    leftIndices.reserve(indices.size());
+    rightIndices.reserve(indices.size());
+    
+    for (int idx : indices) {
+        if (data[idx * rowLength + bestFeat] <= bestThr) {
+            leftIndices.push_back(idx);
+        } else {
+            rightIndices.push_back(idx);
+        }
+    }
+    
+    if (leftIndices.size() < static_cast<size_t>(minSamplesLeaf_) || 
+        rightIndices.size() < static_cast<size_t>(minSamplesLeaf_)) {
+        node->makeLeaf(nodePrediction, nodePrediction);
+        return;
+    }
+
+    // 创建子节点
+    node->makeInternal(bestFeat, bestThr);
+    node->leftChild = std::make_unique<Node>();
+    node->rightChild = std::make_unique<Node>();
+    node->info.internal.left = node->leftChild.get();
+    node->info.internal.right = node->rightChild.get();
+
+    // **关键：将子节点任务加入队列**
+    if (!leftIndices.empty()) {
+        auto leftTask = std::make_unique<SplitTask>(
+            node->leftChild.get(), std::move(leftIndices), depth + 1);
+        taskQueue.push(std::move(leftTask));
+        totalTasks++;
+    }
+    
+    if (!rightIndices.empty()) {
+        auto rightTask = std::make_unique<SplitTask>(
+            node->rightChild.get(), std::move(rightIndices), depth + 1);
+        taskQueue.push(std::move(rightTask));
+        totalTasks++;
+    }
+}
+
+// **优化的节点分裂（保留用于小数据集）**
+void SingleTreeTrainer::splitNodeOptimized(Node* node,
+                                           const std::vector<double>& data,
+                                           int rowLength,
+                                           const std::vector<double>& labels,
+                                           std::vector<int>& indices,
+                                           int depth) {
+    if (indices.empty()) {
+        node->makeLeaf(0.0);
+        return;
+    }
+    
+    node->metric = criterion_->nodeMetric(labels, indices);
+    node->samples = indices.size();
+    
+    // **高效计算节点预测值**
+    double sum = 0.0;
+    const size_t numSamples = indices.size();
+    
+    // **教授建议：避免过小数据集的并行开销**
+    if (numSamples > 1000) {
+        #pragma omp parallel for reduction(+:sum) schedule(static) num_threads(4)
+        for (size_t i = 0; i < numSamples; ++i) {
+            sum += labels[indices[i]];
+        }
+    } else {
+        for (size_t i = 0; i < numSamples; ++i) {
+            sum += labels[indices[i]];
+        }
+    }
+    const double nodePrediction = sum / numSamples;
+    
+    // 停止条件检查
+    if (depth >= maxDepth_ || 
+        indices.size() < 2 * static_cast<size_t>(minSamplesLeaf_) ||
+        indices.size() < 2) {
+        node->makeLeaf(nodePrediction, nodePrediction);
+        return;
+    }
+
+    // 寻找最佳分裂
+    auto [bestFeat, bestThr, bestGain] =
+        finder_->findBestSplit(data, rowLength, labels, indices,
+                               node->metric, *criterion_);
+
+    if (bestFeat < 0 || bestGain <= 0) {
+        node->makeLeaf(nodePrediction, nodePrediction);
+        return;
+    }
+
+    // 预剪枝检查
+    if (auto* prePruner = dynamic_cast<const MinGainPrePruner*>(pruner_.get())) {
+        if (bestGain < prePruner->minGain()) {
+            node->makeLeaf(nodePrediction, nodePrediction);
+            return;
+        }
+    }
+
+    // **原地分割策略**
     auto partitionPoint = std::partition(indices.begin(), indices.end(),
         [&](int idx) {
             return data[idx * rowLength + bestFeat] <= bestThr;
@@ -173,24 +346,24 @@ void SingleTreeTrainer::splitNodeOptimized(Node* node,
         return;
     }
 
-    // **使用智能指针创建子节点**
+    // 创建子节点
     node->makeInternal(bestFeat, bestThr);
-    node->leftChild  = std::make_unique<Node>();
+    node->leftChild = std::make_unique<Node>();
     node->rightChild = std::make_unique<Node>();
     node->info.internal.left = node->leftChild.get();
     node->info.internal.right = node->rightChild.get();
 
-    // **创建子索引向量（移动语义优化）**
+    // 创建子索引向量
     std::vector<int> leftIndices(indices.begin(), partitionPoint);
     std::vector<int> rightIndices(partitionPoint, indices.end());
     
-    // **优化: 智能并行递归策略**
-    const bool useParallelRecursion = (depth <= 3) && 
+    // **谨慎的并行递归（仅在前几层使用）**
+    const bool useParallelRecursion = (depth <= 2) && 
                                      (indices.size() > 2000) &&
-                                     (leftIndices.size() > 500 || rightIndices.size() > 500);
+                                     (leftIndices.size() > 500 && rightIndices.size() > 500);
     
     if (useParallelRecursion) {
-        #pragma omp parallel sections if(depth <= 2)
+        #pragma omp parallel sections num_threads(2)
         {
             #pragma omp section
             {
@@ -205,15 +378,14 @@ void SingleTreeTrainer::splitNodeOptimized(Node* node,
         }
     } else {
         // 串行递归处理
-        splitNodeOptimized(node->leftChild.get(),  data, rowLength, 
-                          labels, leftIndices,  depth + 1);
+        splitNodeOptimized(node->leftChild.get(), data, rowLength, 
+                          labels, leftIndices, depth + 1);
         splitNodeOptimized(node->rightChild.get(), data, rowLength, 
                           labels, rightIndices, depth + 1);
     }
 }
 
-double SingleTreeTrainer::predict(const double* sample,
-                                  int /* rowLength */) const {
+double SingleTreeTrainer::predict(const double* sample, int /* rowLength */) const {
     const Node* cur = root_.get();
     while (cur && !cur->isLeaf) {
         const double v = sample[cur->getFeatureIndex()];
@@ -227,14 +399,12 @@ void SingleTreeTrainer::evaluate(const std::vector<double>& X,
                                  const std::vector<double>& y,
                                  double& mse,
                                  double& mae) {
-    auto evalStart = std::chrono::high_resolution_clock::now();
-    
     const size_t n = y.size();
     mse = 0.0;
     mae = 0.0;
     
-    // **优化: 并行预测和误差计算**
-    #pragma omp parallel for reduction(+:mse,mae) schedule(static, 256) if(n > 1000)
+    // **并行预测和误差计算，使用 num_threads 子句**
+    #pragma omp parallel for reduction(+:mse,mae) schedule(static, 256) num_threads(4) if(n > 1000)
     for (size_t i = 0; i < n; ++i) {
         const double pred = predict(&X[i * rowLength], rowLength);
         const double diff = y[i] - pred;
@@ -244,11 +414,6 @@ void SingleTreeTrainer::evaluate(const std::vector<double>& X,
     
     mse /= n;
     mae /= n;
-    
-    auto evalEnd = std::chrono::high_resolution_clock::now();
-    auto evalTime = std::chrono::duration_cast<std::chrono::milliseconds>(evalEnd - evalStart);
-    
-    std::cout << "Evaluation completed in " << evalTime.count() << "ms" << std::endl;
 }
 
 void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth, 
@@ -265,14 +430,14 @@ void SingleTreeTrainer::calculateTreeStats(const Node* node, int currentDepth,
     }
 }
 
-// **兼容性方法（保留原有API）**
+// 兼容性方法
 void SingleTreeTrainer::splitNode(Node* node,
                                   const std::vector<double>& data,
                                   int rowLength,
                                   const std::vector<double>& labels,
                                   const std::vector<int>& indices,
                                   int depth) {
-    std::vector<int> mutableIndices = indices; // 需要拷贝以保持const正确性
+    std::vector<int> mutableIndices = indices;
     splitNodeOptimized(node, data, rowLength, labels, mutableIndices, depth);
 }
 
