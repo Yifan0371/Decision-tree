@@ -37,3 +37,6 @@
 script/**/*.txt
 # 忽略 script 文件夹中所有的 txt 文件
 script/*.txt
+
+script/*.log
+script/**/*.txt
