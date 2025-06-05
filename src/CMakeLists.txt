@@ -8,8 +8,13 @@ add_subdirectory(preprocessing)
 add_subdirectory(functions/io)
 add_subdirectory(pipeline)
 add_subdirectory(tree)
-add_subdirectory(boosting)  # 回归Boosting模块
-add_subdirectory(xgboost)   # XGBoost 模块
-add_subdirectory(lightgbm)  # LightGBM 模块
+add_subdirectory(boosting)
+add_subdirectory(xgboost)
+add_subdirectory(lightgbm)
 add_subdirectory(app)
-add_subdirectory(histogram)      # **新增**: 预计算直方图优化模块
+add_subdirectory(histogram)
+
+# 如果有性能测试（BUILD_PERFORMANCE_TESTS = ON），将它们纳入
+if(BUILD_PERFORMANCE_TESTS)
+    add_subdirectory(tests/performance)
+endif()
