@@ -1,0 +1,29 @@
+===============================================
+LightGBM Strong Scaling Performance Test Log
+运行时间: 2025年 06月 05日 星期四 11:50:34 CEST
+项目根: /home/yifan/桌面/CHPS_M1/ppn重启/6-5优化/1xgboos优化/Decision-tree
+===============================================
+PROJECT_ROOT=/home/yifan/桌面/CHPS_M1/ppn重启/6-5优化/1xgboos优化/Decision-tree
+物理核心数 (排除超线程)：4，已设置 OMP_NUM_THREADS=4
+===============================================
+    LightGBM Strong Scaling Performance Test    
+===============================================
+Fixed Parameters:
+  Iterations: 100 | Learning Rate: 0.1
+  Num Leaves: 31 | Min Data in Leaf: 20
+  Split Method: histogram_eq:64
+  Data: cleaned_data.csv
+
+Threads | Elapsed(ms) | TestMSE    | TestMAE    | Trees      | LGB/sec
+--------|-------------|------------|------------|------------|----------
+      1 |         955 | 0.000158   | 0.007102   | 100        | 104.71
+      2 |         638 | 0.000160   | 0.007123   | 100        | 156.73
+      4 |         498 | 0.000163   | 0.007278   | 100        | 200.80
+
+===============================================
+Strong Scaling Analysis:
+- 理想: 线性加速，时间反比于线程数
+- 关注点: TestMSE 保持稳定，Elapsed 时间下降
+- 效率 = (串行时间 / 并行时间) / 线程数
+- LightGBM 特有: GOSS和EFB优化对并行性能的影响
+===============================================

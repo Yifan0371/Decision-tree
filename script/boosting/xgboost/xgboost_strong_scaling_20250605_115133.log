@@ -1,0 +1,36 @@
+===============================================
+XGBoost Strong Scaling Performance Test Log
+运行时间: 2025年 06月 05日 星期四 11:51:33 CEST
+项目根: /home/yifan/桌面/CHPS_M1/ppn重启/6-5优化/1xgboos优化/Decision-tree
+===============================================
+PROJECT_ROOT=/home/yifan/桌面/CHPS_M1/ppn重启/6-5优化/1xgboos优化/Decision-tree
+物理核心数 (排除超线程)：4，已设置 OMP_NUM_THREADS=4
+===============================================
+    XGBoost Strong Scaling Performance Test    
+===============================================
+Fixed Parameters:
+  Objective: reg:squarederror | Rounds: 100
+  Eta: 0.3 | Max Depth: 6
+  Min Child Weight: 1 | Lambda: 1.0
+  Gamma: 0.0 | Subsample: 1.0
+  ColSample: 1.0
+  Data: cleaned_data.csv
+
+Threads | Elapsed(ms) | TestMSE    | TrainTime  | Trees/sec | Efficiency
+--------|-------------|------------|------------|-----------|----------
+      1 |        1554 | 0.000113   | 1479ms     | 64.35     | 1.00
+      2 |        1018 | 0.000114   | 957ms      | 98.23     | .76
+      4 |        1055 | 0.000114   | 982ms      | 94.78     | .36
+
+===============================================
+XGBoost Strong Scaling Analysis:
+- 理想: 线性加速，时间反比于线程数
+- 关注点: TestMSE 保持稳定，Elapsed 时间下降
+- 效率 = (串行时间 / 并行时间) / 线程数
+
+XGBoost并行特性:
+- 预排序并行: 高效率，接近线性扩展
+- 梯度计算并行: 完美并行，效率接近1.0
+- 树构建并行: 中等并行度，受分裂查找限制
+- 整体预期效率: 0.8-0.95（优于传统GBRT）
+===============================================
