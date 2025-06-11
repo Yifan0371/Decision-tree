@@ -1,0 +1,5 @@
+# Weak Scaling Test Results - Pure OpenMP Version
+# Date: Wed Jun 11 12:37:01 PM UTC 2025
+# Base workload: 25 trees per core
+# Format: Cores,OpenMP_Threads,Total_Trees,Wall_Time_ms,Train_Time_ms,Test_MSE,Test_MAE,Efficiency
+1,1,25,1073,1032,0.000168,0.006772,1.00

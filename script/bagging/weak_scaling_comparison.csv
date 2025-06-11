@@ -1,0 +1,13 @@
+# Weak Scaling Comparison Report
+# Date: Wed Jun 11 12:28:46 PM UTC 2025
+# Base workload: 25 trees per core
+# Format: Cores,Total_Trees,MPI_Time_ms,OpenMP_Time_ms,MPI_Efficiency,OpenMP_Efficiency,Time_Ratio
+1,25,1200,1123,1.00,1.00,.93
+2,50,1270,1699,.944,.660,1.33
+4,100,1359,1804,.883,.622,1.32
+6,150,2370,1887,.506,.595,.79
+9,225,2323,2027,.516,.554,.87
+12,300,2632,2129,.455,.527,.80
+18,450,4596,2215,.261,.506,.48
+24,600,5327,2230,.225,.503,.41
+36,900,5654,2301,.212,.488,.40

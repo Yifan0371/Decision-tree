@@ -1,0 +1,5 @@
+# Weak Scaling Test Results - MPI+OpenMP Version
+# Date: Wed Jun 11 12:37:01 PM UTC 2025
+# Base workload: 25 trees per core
+# Format: Cores,MPI_Processes,OpenMP_Threads,Total_Trees,Wall_Time_ms,Train_Time_ms,Test_MSE,Test_MAE,Efficiency
+1,1,1,25,1199,1199,0.000165,0.006669,1.00
