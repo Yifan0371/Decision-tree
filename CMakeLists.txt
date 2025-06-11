@@ -5,7 +5,36 @@ project(DecisionTree)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Add this section after OpenMP configuration in the root CMakeLists.txt
+if(ENABLE_MPI AND MPI_CXX_FOUND)
+    add_subdirectory(mpi_bagging)
+endif() 
+# =============================================================================
+# MPI Configuration (Optional)
+# =============================================================================
+option(ENABLE_MPI "Enable MPI support for distributed Bagging" OFF)
 
+if(ENABLE_MPI)
+    find_package(MPI REQUIRED)
+    if(MPI_CXX_FOUND)
+        message(STATUS "MPI found:")
+        message(STATUS "  MPI Version: ${MPI_CXX_VERSION}")
+        message(STATUS "  MPI Compiler: ${MPI_CXX_COMPILER}")
+        message(STATUS "  MPI Include: ${MPI_CXX_INCLUDE_DIRS}")
+        message(STATUS "  MPI Libraries: ${MPI_CXX_LIBRARIES}")
+        
+        # Check MPI+OpenMP compatibility
+        if(OpenMP_CXX_FOUND)
+            message(STATUS "MPI+OpenMP hybrid parallelism enabled")
+        endif()
+    endif()
+endif()
+
+# Add to configuration summary at the end:
+message(STATUS "MPI Support: ${ENABLE_MPI}")
+if(ENABLE_MPI AND MPI_CXX_FOUND)
+    message(STATUS "MPI Implementation: ${MPI_CXX_VERSION}")
+endif()
 # =============================================================================
 # OpenMP配置（增强版）
 # =============================================================================

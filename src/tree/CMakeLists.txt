@@ -1,7 +1,57 @@
 # =============================================================================
 # src/tree/CMakeLists.txt - 决策树模块（干净版本）
 # =============================================================================
+# Add this section at the end of src/tree/CMakeLists.txt
 
+# =============================================================================
+# MPI-enabled Bagging (Optional)
+# =============================================================================
+if(ENABLE_MPI AND MPI_CXX_FOUND)
+    # MPI Bagging library as STATIC library
+    add_library(MPIBagging_lib STATIC
+        ensemble/MPIBaggingTrainer.cpp
+    )
+    
+    target_include_directories(MPIBagging_lib PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+        ${MPI_CXX_INCLUDE_DIRS}
+    )
+    
+    # Link dependencies
+    target_link_libraries(MPIBagging_lib PUBLIC
+        DecisionTree_lib          # Includes BaggingTrainer
+        HistogramOptimized_lib
+        MPI::MPI_CXX
+    )
+    
+    # OpenMP support for hybrid parallelism
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(MPIBagging_lib PUBLIC OpenMP::OpenMP_CXX)
+    endif()
+    
+    # Compiler flags for MPI
+    target_compile_options(MPIBagging_lib PRIVATE
+        ${MPI_CXX_COMPILE_FLAGS}
+    )
+    
+    # Performance optimizations
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(MPIBagging_lib PRIVATE
+            -O3
+            -march=native
+            -funroll-loops
+            -ftree-vectorize
+        )
+    endif()
+    
+    # Install MPI library
+    install(TARGETS MPIBagging_lib
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+    )
+    
+    message(STATUS "MPI Bagging support enabled")
+endif()
 # 决策树核心模块，包含 criterion、finder、pruner、trainer、ensemble
 add_library(DecisionTree_lib
     # 分裂准则

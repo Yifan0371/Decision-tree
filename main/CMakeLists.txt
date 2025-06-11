@@ -2,7 +2,29 @@
 
 # 将所有可执行文件输出到 build/ 根目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+# Add this section at the end of main/CMakeLists.txt
 
+# =================================================================
+# MPI Bagging (Optional)
+# =================================================================
+if(ENABLE_MPI)
+    add_subdirectory(mpi_bagging)
+endif()
+
+# Update the usage information section:
+add_custom_target(main-info
+    COMMAND ${CMAKE_COMMAND} -E echo "=== Available Main Programs ==="
+    COMMAND ${CMAKE_COMMAND} -E echo "DecisionTreeMain    - Single tree + Bagging modes"
+    COMMAND ${CMAKE_COMMAND} -E echo "BaggingMain         - Bootstrap Aggregating only"
+    COMMAND ${CMAKE_COMMAND} -E echo "RegressionBoostingMain - GBRT with DART support"
+    COMMAND ${CMAKE_COMMAND} -E echo "XGBoostMain         - XGBoost implementation"
+    COMMAND ${CMAKE_COMMAND} -E echo "LightGBMMain        - LightGBM implementation"
+    COMMAND ${CMAKE_COMMAND} -E echo "DataCleanApp        - Data preprocessing tool"
+    COMMAND ${CMAKE_COMMAND} -E echo "$<$<BOOL:${ENABLE_MPI}>:MPIBaggingMain       - MPI distributed Bagging>"
+    COMMAND ${CMAKE_COMMAND} -E echo "================================"
+    COMMAND ${CMAKE_COMMAND} -E echo "Usage: ./build/[ProgramName] --help"
+    COMMAND ${CMAKE_COMMAND} -E echo "$<$<BOOL:${ENABLE_MPI}>:MPI Usage: mpirun -np N ./build/MPIBaggingMain [args]>"
+)
 # =================================================================
 # 单决策树主程序 (包含Bagging模式)
 # =================================================================
@@ -92,19 +114,4 @@ install(TARGETS
     LightGBMMain
     DataCleanApp
     RUNTIME DESTINATION bin
-)
-
-# =================================================================
-# 使用提示
-# =================================================================
-add_custom_target(main-info
-    COMMAND ${CMAKE_COMMAND} -E echo "=== Available Main Programs ==="
-    COMMAND ${CMAKE_COMMAND} -E echo "DecisionTreeMain    - Single tree + Bagging modes"
-    COMMAND ${CMAKE_COMMAND} -E echo "BaggingMain         - Bootstrap Aggregating only"
-    COMMAND ${CMAKE_COMMAND} -E echo "RegressionBoostingMain - GBRT with DART support"
-    COMMAND ${CMAKE_COMMAND} -E echo "XGBoostMain         - XGBoost implementation"
-    COMMAND ${CMAKE_COMMAND} -E echo "LightGBMMain        - LightGBM implementation"
-    COMMAND ${CMAKE_COMMAND} -E echo "DataCleanApp        - Data preprocessing tool"
-    COMMAND ${CMAKE_COMMAND} -E echo "================================"
-    COMMAND ${CMAKE_COMMAND} -E echo "Usage: ./build/[ProgramName] --help"
 )
